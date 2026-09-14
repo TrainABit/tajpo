@@ -32,3 +32,7 @@ The app targets macOS 14 and Swift 6. Because this environment cannot run Xcode/
 ## Next
 
 Local MLX/llama.cpp inference, signed/notarized distribution, richer shortcut recording, streaming UI, and tests for Accessibility behavior across host apps are deliberately outside this first MVP.
+
+## Streaming and safety
+
+OpenAI responses stream over the Chat Completions SSE connection. The menu shows received character progress while the model writes. Tajpo rejects secure/password fields, empty selections, and selections above 100,000 characters. Clipboard fallback restores all pasteboard item data after copying or pasting.
