@@ -1,5 +1,5 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 
 public enum SelectionGeometry {
     public static func frame(for element: AXUIElement?) -> CGRect? {

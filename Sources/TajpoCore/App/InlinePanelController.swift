@@ -133,7 +133,7 @@ private struct InlineRewriteView: View {
             ScrollView {
                 Text(text.isEmpty ? placeholder : text)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundStyle(text.isEmpty ? (emphasizeError ? .red : .secondary) : .primary)
+                    .foregroundStyle(text.isEmpty ? (emphasizeError ? Color.red : Color.secondary) : Color.primary)
                     .textSelection(.enabled)
             }
             .padding(8)

@@ -133,11 +133,11 @@ public final class AppModel: ObservableObject {
             return
         }
         generateTask?.cancel()
-        let task = Task { [weak self] in
-            await self?.generate(capture.text)
+        generateTask = Task { [weak self] in
+            guard let self else { return }
+            await self.generate(capture.text)
         }
-        generateTask = task
-        await task.value
+        await generateTask?.value
     }
 
     public func applyPreview() async {
@@ -242,8 +242,11 @@ public final class AppModel: ObservableObject {
     }
 
     public func hasSavedAPIKey() -> Bool {
-        if let key = try? keyStore.load(), let key, !key.isEmpty { return true }
-        return false
+        do {
+            return !(try keyStore.load() ?? "").isEmpty
+        } catch {
+            return false
+        }
     }
 
     private func generate(_ text: String) async {

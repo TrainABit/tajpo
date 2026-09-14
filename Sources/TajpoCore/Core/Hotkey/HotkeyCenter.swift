@@ -19,7 +19,7 @@ public final class HotkeyCenter: @unchecked Sendable {
         defer { lock.unlock() }
         try installHandlerIfNeeded()
         unregisterLocked(id: id)
-        var identifier = EventHotKeyID(signature: OSType(0x544A504F), id: id)
+        let identifier = EventHotKeyID(signature: OSType(0x544A504F), id: id)
         var reference: EventHotKeyRef?
         guard RegisterEventHotKey(
             spec.keyCode,

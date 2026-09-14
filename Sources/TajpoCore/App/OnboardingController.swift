@@ -146,7 +146,7 @@ private struct OnboardingView: View {
     private func statusLine(ok: Bool, okText: String, missing: String) -> some View {
         Text(ok ? okText : missing)
             .font(.caption)
-            .foregroundStyle(ok ? .green : .secondary)
+            .foregroundStyle(ok ? Color.green : Color.secondary)
     }
 
     private func saveKey() {

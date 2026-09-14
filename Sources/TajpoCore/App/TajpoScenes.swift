@@ -55,11 +55,11 @@ struct MenuBarView: View {
                 if model.isWorking { ProgressView().controlSize(.small) }
                 Text(model.status)
                     .font(.caption)
-                    .foregroundStyle(model.isError ? .red : .secondary)
+                    .foregroundStyle(model.isError ? Color.red : Color.secondary)
             }
             Text(model.isAccessibilityTrusted ? "Accessibility: granted" : "Accessibility: missing")
                 .font(.caption)
-                .foregroundStyle(model.isAccessibilityTrusted ? .secondary : .red)
+                .foregroundStyle(model.isAccessibilityTrusted ? Color.secondary : Color.red)
             if !model.usageLabel.isEmpty {
                 Text(model.usageLabel)
                     .font(.caption)

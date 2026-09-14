@@ -17,7 +17,8 @@ let package = Package(
         .executableTarget(
             name: "Tajpo",
             dependencies: ["TajpoCore"],
-            path: "Sources/Tajpo"
+            path: "Sources/Tajpo",
+            exclude: ["Info.plist", "Tajpo.entitlements"]
         ),
         .testTarget(
             name: "TajpoTests",
