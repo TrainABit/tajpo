@@ -12,6 +12,18 @@ enum RewriteTone: String, CaseIterable, Identifiable {
     var title: String { rawValue.capitalized }
 }
 
+enum PromptBuilder {
+    static func systemPrompt(action: RewriteAction, tone: RewriteTone) -> String {
+        let task: String = switch action {
+        case .improve: "Improve grammar, clarity, and flow."
+        case .rewrite: "Rewrite naturally while preserving the meaning."
+        case .shorten: "Make it substantially shorter without losing key information."
+        case .changeTone: "Rewrite it in a \(tone.rawValue) tone."
+        }
+        return "\(task) Preserve the original language unless asked otherwise. Do not add facts. Return only the final text, without quotes or commentary."
+    }
+}
+
 protocol LLMClient {
-    func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone) async throws -> String
+    func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone, onPartial: @escaping @MainActor (String) -> Void) async throws -> String
 }
