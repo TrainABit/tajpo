@@ -36,3 +36,11 @@ Local MLX/llama.cpp inference, signed/notarized distribution, richer shortcut re
 ## Streaming and safety
 
 OpenAI responses stream over the Chat Completions SSE connection. The menu shows received character progress while the model writes. Tajpo rejects secure/password fields, empty selections, and selections above 100,000 characters. Clipboard fallback restores all pasteboard item data after copying or pasting.
+
+## Inline workflow
+
+Select text and press the global shortcut. Tajpo reads the AX selection bounds and opens a floating SwiftUI-backed `NSPanel` beside the cursor. Choose Correct, Improve, Rewrite, Shorten, or Tone. Output streams in the panel, then Replace, Copy, or Retry. The menu bar remains a lightweight status/settings hub.
+
+Writing presets include Professional and Casual, with custom name + system prompt creation in Settings. All action prompts pass through the separately testable `PromptBuilder.antiSlop` rules. Correction intentionally changes only grammar, spelling, and punctuation.
+
+First launch opens a five-step onboarding window: product explanation, just-in-time Accessibility rationale/request, shortcut exercise, Keychain API-key setup, and a practice field.
