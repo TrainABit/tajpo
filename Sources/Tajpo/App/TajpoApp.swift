@@ -28,6 +28,8 @@ struct MenuBarView: View {
             Button(model.isWorking ? "Working..." : "Rewrite selected text") {
                 Task { await model.rewriteSelection() }
             }.disabled(model.isWorking)
+            Button("Repeat last action") { Task { await model.repeatLastAction() } }
+                .disabled(model.isWorking)
             HStack {
                 if model.isWorking { ProgressView().controlSize(.small) }
                 Text(model.status).font(.caption).foregroundStyle(model.isError ? .red : .secondary)
