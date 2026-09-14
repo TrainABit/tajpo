@@ -4,9 +4,24 @@ import PackageDescription
 let package = Package(
     name: "Tajpo",
     platforms: [.macOS(.v14)],
-    products: [.executable(name: "Tajpo", targets: ["Tajpo"])],
+    products: [
+        .library(name: "TajpoCore", targets: ["TajpoCore"]),
+        .executable(name: "Tajpo", targets: ["Tajpo"])
+    ],
     targets: [
-        .executableTarget(name: "Tajpo", path: "Sources/Tajpo", resources: [.process("Resources")]),
-        .testTarget(name: "TajpoTests", dependencies: ["Tajpo"])
+        .target(
+            name: "TajpoCore",
+            path: "Sources/TajpoCore",
+            resources: [.process("Resources")]
+        ),
+        .executableTarget(
+            name: "Tajpo",
+            dependencies: ["TajpoCore"],
+            path: "Sources/Tajpo"
+        ),
+        .testTarget(
+            name: "TajpoTests",
+            dependencies: ["TajpoCore"]
+        )
     ]
 )
