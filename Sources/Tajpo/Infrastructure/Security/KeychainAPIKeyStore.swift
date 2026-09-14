@@ -23,6 +23,7 @@ struct KeychainAPIKeyStore: APIKeyStoring {
     }
 
     func save(_ value: String) throws {
+        let value = try APIKeyValidator.validate(value)
         try deleteIgnoringMissing()
         var query = baseQuery
         query[kSecValueData as String] = Data(value.utf8)

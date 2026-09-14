@@ -12,8 +12,8 @@ Tajpo has no account, backend, analytics, or text logging. Text stays on the Mac
 - Clipboard fallback with clipboard backup/restore
 - Accessibility permission prompt and actionable errors
 - OpenAI Chat Completions (`gpt-4o-mini` default, configurable)
-- Improve, rewrite, shorten, and tone actions
-- Configurable key and modifiers for the global Carbon hotkey
+- Correct, improve, rewrite, shorten, and tone actions
+- Configurable key and modifiers for the global Carbon hotkey (requires at least one modifier)
 - Menu bar progress, status, and error feedback
 - Clear missing-key, network, API, empty-response, and rate-limit errors
 
@@ -27,7 +27,7 @@ Tajpo has no account, backend, analytics, or text logging. Text stays on the Mac
 6. Open Tajpo Settings, save an OpenAI API key, then request Accessibility access.
 7. If macOS does not refresh permission immediately after rebuilding, remove the old Tajpo entry under **System Settings > Privacy & Security > Accessibility**, add/enable the current build, and relaunch.
 
-The app targets macOS 14 and Swift 6. Because this environment cannot run Xcode/macOS frameworks, the first Xcode build may reveal a small SDK/compiler adjustment.
+The app targets macOS 14 and Swift 6. Tajpo hides the Dock icon at launch (`NSApplication.ActivationPolicy.accessory`) and registers the global hotkey immediately, so you do not need to open the menu first. For a Dock-less archived build, also set `LSUIElement` to YES in the target Info tab. Because this environment cannot run Xcode/macOS frameworks, the first Xcode build may reveal a small SDK/compiler adjustment.
 
 ## Next
 
@@ -35,7 +35,7 @@ Local MLX/llama.cpp inference, signed/notarized distribution, richer shortcut re
 
 ## Streaming and safety
 
-OpenAI responses stream over the Chat Completions SSE connection. The menu shows received character progress while the model writes. Tajpo rejects secure/password fields, empty selections, and selections above 100,000 characters. Clipboard fallback restores all pasteboard item data after copying or pasting.
+OpenAI responses stream over the Chat Completions SSE connection. The menu shows received character progress while the model writes. Tajpo rejects secure/password fields (including ancestor AX roles), empty selections, and selections above 100,000 characters. Clipboard fallback restores all pasteboard item data after copying or pasting, and paste replacement reactivates the source app so text does not land in Tajpo.
 
 ## Inline workflow
 
