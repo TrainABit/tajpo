@@ -6,6 +6,8 @@ struct SettingsView: View {
     @ObservedObject private var settings: AppSettings
     @State private var apiKey = ""
     @State private var message = ""
+    @State private var presetName = ""
+    @State private var presetPrompt = ""
     private let keyStore = KeychainAPIKeyStore()
 
     init(model: AppModel) { self.model = model; settings = model.settings }
@@ -24,6 +26,12 @@ struct SettingsView: View {
                 Toggle("Option (⌥)", isOn: binding(UInt32(optionKey)))
                 Toggle("Control (⌃)", isOn: binding(UInt32(controlKey)))
                 Button("Apply shortcut") { model.configureHotkey() }
+            }
+            Section("Writing presets") {
+                Picker("Active", selection: $model.presets.selectedID) { ForEach(model.presets.presets) { Text($0.name).tag(Optional($0.id)) } }
+                TextField("New preset name", text: $presetName)
+                TextField("System prompt", text: $presetPrompt, axis: .vertical)
+                Button("Add preset") { model.presets.add(name: presetName, prompt: presetPrompt); presetName = ""; presetPrompt = "" }
             }
             Section("Permissions") { Text("Tajpo needs Accessibility access to read and replace selected text."); Button("Request Accessibility access") { model.requestAccessibility() } }
             Section("Privacy") { Text("Text leaves your Mac only in direct requests to OpenAI using your key. Tajpo has no backend and does not log text.") }
