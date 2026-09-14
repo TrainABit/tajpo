@@ -1,30 +1,34 @@
 # Tajpo
 
-A private, native macOS writing tool. Select text anywhere, press a global hotkey, and Tajpo improves or rewrites it in place.
+A private native macOS menu bar app: select text anywhere, press a global shortcut, and improve, rewrite, shorten, or change its tone.
 
-## Privacy promise
+## Privacy
 
-- No Tajpo account and no Tajpo backend are required for the MVP.
-- Text stays on the Mac except for the API request made directly to the provider chosen by the user.
-- The OpenAI API key is BYOK and stored in Keychain.
-- A local provider (MLX or llama.cpp) can implement the same LLM client interface later.
-- No analytics or text logging by default.
+Tajpo has no account, backend, analytics, or text logging. Text stays on the Mac except for direct calls from the app to OpenAI using the user's own API key. The key is stored in macOS Keychain. A local MLX/llama.cpp provider is planned behind the same client boundary.
 
-## MVP scope
+## MVP
 
-1. Menu bar app and settings.
-2. User-configurable global hotkey.
-3. Read selected text through macOS Accessibility APIs.
-4. Rewrite through the user's OpenAI API key.
-5. Replace the selection while preserving the clipboard where possible.
-6. Clear permission, error, and progress states.
+- Accessibility API selection capture and replacement
+- Clipboard fallback with clipboard backup/restore
+- Accessibility permission prompt and actionable errors
+- OpenAI Chat Completions (`gpt-4o-mini` default, configurable)
+- Improve, rewrite, shorten, and tone actions
+- Configurable key and modifiers for the global Carbon hotkey
+- Menu bar progress, status, and error feedback
+- Clear missing-key, network, API, empty-response, and rate-limit errors
 
-## Architecture
+## Build in Xcode
 
-The starter is a Swift 6 / macOS 14 package. It separates app composition, hotkey handling, text selection, provider-neutral LLM access, Keychain storage, and settings. That keeps a future local MLX or llama.cpp provider independent from the rewrite feature.
+1. Clone or download the repository.
+2. In Xcode choose **File > Open** and select `Package.swift`.
+3. Select the `Tajpo` scheme and **My Mac** destination.
+4. In **Signing & Capabilities**, choose your Apple Developer Team if Xcode requests signing.
+5. Build and run.
+6. Open Tajpo Settings, save an OpenAI API key, then request Accessibility access.
+7. If macOS does not refresh permission immediately after rebuilding, remove the old Tajpo entry under **System Settings > Privacy & Security > Accessibility**, add/enable the current build, and relaunch.
 
-The complete starter source is in `tajpo-source.zip` in this repository. Extract it locally to preserve its directory structure (`Sources/Tajpo/...`, `Tests/...`, `Package.swift`).
+The app targets macOS 14 and Swift 6. Because this environment cannot run Xcode/macOS frameworks, the first Xcode build may reveal a small SDK/compiler adjustment.
 
 ## Next
 
-Make Accessibility-based replacement robust, add editable shortcut recording, test the OpenAI Responses integration, and add permission/error UX.
+Local MLX/llama.cpp inference, signed/notarized distribution, richer shortcut recording, streaming UI, and tests for Accessibility behavior across host apps are deliberately outside this first MVP.
