@@ -4,14 +4,14 @@ struct OpenAIClient: LLMClient {
     let apiKey: String
     let model: String
 
-    func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone, onPartial: @escaping @MainActor (String) -> Void) async throws -> String {
+    func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone, preset: WritingPreset?, onPartial: @escaping @MainActor (String) -> Void) async throws -> String {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 90
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(Request(model: model, messages: [
-            .init(role: "system", content: PromptBuilder.systemPrompt(action: action, tone: tone)),
+            .init(role: "system", content: PromptBuilder.systemPrompt(action: action, tone: tone, preset: preset)),
             .init(role: "user", content: text)
         ], temperature: 0.3, stream: true))
 
