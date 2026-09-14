@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [.executable(name: "Tajpo", targets: ["Tajpo"])],
     targets: [
-        .executableTarget(name: "Tajpo", path: "Sources/Tajpo"),
+        .executableTarget(name: "Tajpo", path: "Sources/Tajpo", resources: [.process("Resources")]),
         .testTarget(name: "TajpoTests", dependencies: ["Tajpo"])
     ]
 )
