@@ -1,0 +1,36 @@
+import SwiftUI
+
+@main
+struct TajpoApp: App {
+    @State private var appModel = AppModel()
+
+    var body: some Scene {
+        MenuBarExtra("Tajpo", systemImage: appModel.isWorking ? "sparkles" : "character.cursor.ibeam") {
+            MenuBarView(appModel: appModel)
+                .task { appModel.start() }
+        }
+        Settings {
+            SettingsView(appModel: appModel)
+        }
+    }
+}
+
+struct MenuBarView: View {
+    @Bindable var appModel: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(appModel.status)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Rewrite selected text") { Task { await appModel.rewriteSelection() } }
+                .keyboardShortcut("r")
+                .disabled(appModel.isWorking)
+            Divider()
+            SettingsLink { Text("Settings...") }
+            Button("Quit Tajpo") { NSApplication.shared.terminate(nil) }
+        }
+        .padding(12)
+        .frame(width: 250)
+    }
+}
