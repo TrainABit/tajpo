@@ -52,10 +52,25 @@ await page.getByRole("button", { name: "Tajpo" }).click();
 await page.getByRole("button", { name: "Settings" }).click();
 await page.waitForTimeout(400);
 await page.screenshot({ path: path.join(out, "settings_model.png") });
+await page.getByRole("tab", { name: "writing" }).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(out, "settings_writing.png") });
+await page.getByRole("tab", { name: "appearance" }).click();
+await page.waitForTimeout(200);
+await page.screenshot({ path: path.join(out, "settings_appearance.png") });
 await page.getByRole("tab", { name: "privacy" }).click();
 await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(out, "settings_privacy.png") });
 await page.getByRole("button", { name: "Close" }).click();
+
+await page.getByRole("button", { name: "Switch to light theme" }).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(out, "desktop_light.png") });
+await page.getByRole("button", { name: "Switch to dark theme" }).click();
+await page.getByRole("tab", { name: "Pages" }).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(out, "desktop_pages.png") });
+await page.getByRole("tab", { name: "Notes" }).click();
 
 await editor.click();
 await page.keyboard.press("End");

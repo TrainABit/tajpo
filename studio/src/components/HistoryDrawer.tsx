@@ -1,8 +1,9 @@
-import { actionMeta } from "../engine";
-import { useStudio } from "../state/store";
+import { actionMeta, rewriteActions } from "../engine";
+import { useStudio, visibleHistory } from "../state/store";
 
 export function HistoryDrawer() {
   const { state, dispatch } = useStudio();
+  const entries = visibleHistory(state);
 
   return (
     <aside className="drawer" aria-label="Rewrite history">
@@ -12,11 +13,37 @@ export function HistoryDrawer() {
           Close
         </button>
       </div>
-      <p className="hint">Stored only in this browser. Never uploaded.</p>
+      <p className="hint">Stored only in this browser. Never uploaded. Click an entry to restore it into the panel.</p>
+      <label className="stack">
+        Search
+        <input
+          value={state.historyQuery}
+          placeholder="Search original, rewrite, action…"
+          onChange={(event) => dispatch({ type: "history-query", query: event.target.value })}
+        />
+      </label>
+      <label className="stack" style={{ margin: "10px 0 14px" }}>
+        Action
+        <select
+          value={state.historyAction}
+          onChange={(event) =>
+            dispatch({ type: "history-action", action: event.target.value as typeof state.historyAction })
+          }
+        >
+          <option value="all">All actions</option>
+          {rewriteActions.map((action) => (
+            <option key={action} value={action}>
+              {actionMeta[action].title}
+            </option>
+          ))}
+        </select>
+      </label>
       {state.history.length === 0 ? (
         <div className="empty">No rewrites yet. Select text and run Tajpo to fill this list.</div>
+      ) : entries.length === 0 ? (
+        <div className="empty">No history matches that search.</div>
       ) : (
-        state.history.map((entry) => (
+        entries.map((entry) => (
           <button
             key={entry.id}
             type="button"
@@ -32,7 +59,12 @@ export function HistoryDrawer() {
           </button>
         ))
       )}
-      <button type="button" className="btn-danger" disabled={state.history.length === 0} onClick={() => dispatch({ type: "clear-history" })}>
+      <button
+        type="button"
+        className="btn-danger"
+        disabled={state.history.length === 0}
+        onClick={() => dispatch({ type: "clear-history" })}
+      >
         Clear history
       </button>
     </aside>

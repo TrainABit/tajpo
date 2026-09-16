@@ -1,17 +1,82 @@
-import { actionMeta, rewriteActions, rewriteTones } from "../engine";
+import { useState } from "react";
+import { actionMeta, rewriteActions, rewriteTones, type RewriteLength } from "../engine";
 import { shortcutLabel, useStudio } from "../state/store";
 
 export function MenuBar() {
   const { state, dispatch, actions } = useStudio();
+  const [openMenu, setOpenMenu] = useState<"file" | "edit" | null>(null);
+
+  const closeMenus = () => setOpenMenu(null);
 
   return (
     <header className="menubar">
       <div className="menubar-left">
         <span className="brand">Tajpo Studio</span>
-        <span>File</span>
-        <span>Edit</span>
+        <div className="menu-slot">
+          <button
+            type="button"
+            className="ghost-toggle"
+            data-active={openMenu === "file"}
+            onClick={() => setOpenMenu(openMenu === "file" ? null : "file")}
+          >
+            File
+          </button>
+          {openMenu === "file" ? (
+            <div className="menu-mini" role="menu">
+              <button type="button" role="menuitem" onClick={() => { dispatch({ type: "toggle-settings", open: true }); closeMenus(); }}>
+                Settings…
+              </button>
+              <button type="button" role="menuitem" onClick={() => { dispatch({ type: "toggle-history", open: true }); closeMenus(); }}>
+                History
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  dispatch({ type: "set-onboarding", open: true, step: 0 });
+                  closeMenus();
+                }}
+              >
+                Replay onboarding
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="menu-slot">
+          <button
+            type="button"
+            className="ghost-toggle"
+            data-active={openMenu === "edit"}
+            onClick={() => setOpenMenu(openMenu === "edit" ? null : "edit")}
+          >
+            Edit
+          </button>
+          {openMenu === "edit" ? (
+            <div className="menu-mini" role="menu">
+              <button type="button" role="menuitem" disabled={state.undoStack.length === 0} onClick={() => { dispatch({ type: "undo" }); closeMenus(); }}>
+                Undo replace
+              </button>
+              <button type="button" role="menuitem" disabled={state.redoStack.length === 0} onClick={() => { dispatch({ type: "redo" }); closeMenus(); }}>
+                Redo replace
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
       <div className="menubar-right">
+        <button
+          type="button"
+          className="ghost-toggle"
+          aria-label={state.settings.theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+          onClick={() =>
+            dispatch({
+              type: "update-settings",
+              settings: { theme: state.settings.theme === "light" ? "dark" : "light" },
+            })
+          }
+        >
+          {state.settings.theme === "light" ? "Dark" : "Light"}
+        </button>
         <span>{state.clock}</span>
         <button
           type="button"
@@ -19,7 +84,10 @@ export function MenuBar() {
           data-active={state.menuOpen}
           aria-expanded={state.menuOpen}
           aria-haspopup="dialog"
-          onClick={() => dispatch({ type: "toggle-menu" })}
+          onClick={() => {
+            closeMenus();
+            dispatch({ type: "toggle-menu" });
+          }}
         >
           <span
             className={`dot ${state.isError ? "error" : ""} ${state.isWorking ? "work" : ""}`}
@@ -35,9 +103,7 @@ export function MenuBar() {
               <h3>Tajpo</h3>
               <small className="hint">{providerTitle(state.settings.provider)}</small>
             </div>
-            <span className={`status-pill ${state.isError ? "error" : ""}`}>
-              {state.status}
-            </span>
+            <span className={`status-pill ${state.isError ? "error" : ""}`}>{state.status}</span>
           </div>
           <div className="chips">
             {rewriteActions.map((action) => (
@@ -50,6 +116,19 @@ export function MenuBar() {
               >
                 {actionMeta[action].title}
                 <small>{actionMeta[action].digit}</small>
+              </button>
+            ))}
+          </div>
+          <div className="split">
+            {(["shorter", "same", "longer"] as RewriteLength[]).map((length) => (
+              <button
+                key={length}
+                type="button"
+                className="chip"
+                data-active={state.length === length}
+                onClick={() => dispatch({ type: "set-length", length })}
+              >
+                {length}
               </button>
             ))}
           </div>
@@ -74,8 +153,11 @@ export function MenuBar() {
             {state.isWorking ? "Working…" : "Open rewrite panel"}
           </button>
           <div className="actions-row">
-            <button type="button" className="btn-ghost" onClick={() => dispatch({ type: "undo" })}>
+            <button type="button" className="btn-ghost" disabled={state.undoStack.length === 0} onClick={() => dispatch({ type: "undo" })}>
               Undo
+            </button>
+            <button type="button" className="btn-ghost" disabled={state.redoStack.length === 0} onClick={() => dispatch({ type: "redo" })}>
+              Redo
             </button>
             <button type="button" className="btn-ghost" onClick={() => dispatch({ type: "toggle-history", open: true })}>
               History
