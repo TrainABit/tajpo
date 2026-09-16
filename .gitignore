@@ -5,3 +5,8 @@ xcuserdata/
 DerivedData/
 *.xcuserstate
 .env
+dist/
+node_modules/
+studio/test-results/
+studio/playwright-report/
+studio/blob-report/
