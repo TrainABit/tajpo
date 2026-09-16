@@ -145,11 +145,6 @@ private struct InlineRewriteView: View {
                 .stroke(TajpoTheme.copper.opacity(0.18), lineWidth: 1)
         )
         .onExitCommand(perform: close)
-        .onAppear {
-            if model.preview.isEmpty && !model.originalText.isEmpty && !model.isWorking && !model.isError {
-                Task { await model.runCurrentCapture() }
-            }
-        }
     }
 
     private var displayedPreview: String {
