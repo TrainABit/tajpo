@@ -1,10 +1,11 @@
-import { antiSlop, type RewriteAction, type RewriteTone, type WritingPreset } from "./types";
+import { antiSlop, type RewriteAction, type RewriteLength, type RewriteTone, type WritingPreset } from "./types";
 
 export function systemPrompt(
   action: RewriteAction,
   tone: RewriteTone,
   preset?: WritingPreset | null,
   customInstructions?: string | null,
+  length: RewriteLength = "same",
 ): string {
   const task = {
     correct:
@@ -29,8 +30,14 @@ export function systemPrompt(
 
   const custom = customInstructions?.trim();
   const customClause = custom ? `Extra instructions from the user: ${custom}` : null;
+  const lengthClause =
+    length === "shorter"
+      ? "Make the result shorter than the source without losing key facts."
+      : length === "longer"
+        ? "Make the result a little longer with one clarifying sentence. Do not invent facts."
+        : null;
 
-  return [task, presetClause, customClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
+  return [task, presetClause, customClause, lengthClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
     .filter(Boolean)
     .join(" ");
 }

@@ -5,33 +5,36 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type Dispatch,
   type ReactNode,
 } from "react";
 import {
+  applyReplacement,
   defaultPresets,
+  filterHistory,
   hostDocuments,
+  redoReplacement,
   streamDemo,
   streamRemote,
+  testConnection,
   tokenCostLabel,
+  undoReplacement,
   validateAPIKey,
   validateSelection,
+  type HistoryEntry,
   type HostId,
   type LLMAuthStyle,
   type LLMProvider,
+  type Replacement,
   type RewriteAction,
+  type RewriteLength,
   type RewriteTone,
+  type StudioTheme,
   type WritingPreset,
 } from "../engine";
 
-export interface HistoryEntry {
-  id: string;
-  createdAt: string;
-  action: RewriteAction;
-  tone: RewriteTone;
-  original: string;
-  result: string;
-}
+export type { HistoryEntry };
 
 export interface StudioSettings {
   provider: LLMProvider;
@@ -42,7 +45,13 @@ export interface StudioSettings {
   apiVersion: string;
   customInstructions: string;
   historyEnabled: boolean;
+  theme: StudioTheme;
   shortcut: { alt: boolean; shift: boolean; meta: boolean; ctrl: boolean; key: string };
+}
+
+export interface Toast {
+  message: string;
+  kind: "ok" | "error";
 }
 
 export interface StudioState {
@@ -53,6 +62,8 @@ export interface StudioState {
   preview: string;
   action: RewriteAction;
   tone: RewriteTone;
+  length: RewriteLength;
+  showDiff: boolean;
   status: string;
   isWorking: boolean;
   isError: boolean;
@@ -67,7 +78,11 @@ export interface StudioState {
   presets: WritingPreset[];
   selectedPresetId: string;
   history: HistoryEntry[];
-  lastReplacement: { start: number; end: number; original: string; rewritten: string } | null;
+  historyQuery: string;
+  historyAction: RewriteAction | "all";
+  undoStack: Replacement[];
+  redoStack: Replacement[];
+  toast: Toast | null;
   clock: string;
 }
 
@@ -78,6 +93,8 @@ type Action =
   | { type: "set-selection"; selection: { start: number; end: number } | null }
   | { type: "set-action"; action: RewriteAction }
   | { type: "set-tone"; tone: RewriteTone }
+  | { type: "set-length"; length: RewriteLength }
+  | { type: "toggle-diff" }
   | { type: "open-panel"; original: string; error?: string }
   | { type: "close-panel" }
   | { type: "toggle-menu"; open?: boolean }
@@ -91,15 +108,19 @@ type Action =
   | { type: "status"; status: string; isError?: boolean }
   | { type: "apply"; start: number; end: number; rewritten: string }
   | { type: "undo" }
+  | { type: "redo" }
   | { type: "record-history"; entry: HistoryEntry }
   | { type: "clear-history" }
   | { type: "restore-history"; entry: HistoryEntry }
+  | { type: "history-query"; query: string }
+  | { type: "history-action"; action: RewriteAction | "all" }
   | { type: "update-settings"; settings: Partial<StudioSettings> }
   | { type: "set-presets"; presets: WritingPreset[]; selectedPresetId?: string }
+  | { type: "toast"; toast: Toast | null }
   | { type: "tick"; clock: string }
   | { type: "idle" };
 
-const storageKey = "tajpo.studio.v1";
+const storageKey = "tajpo.studio.v2";
 
 const defaultSettings: StudioSettings = {
   provider: "demo",
@@ -110,6 +131,7 @@ const defaultSettings: StudioSettings = {
   apiVersion: "",
   customInstructions: "",
   historyEnabled: true,
+  theme: "dark",
   shortcut: { alt: true, shift: true, meta: false, ctrl: false, key: "t" },
 };
 
@@ -118,6 +140,7 @@ function emptyDocuments(): Record<HostId, string> {
     notes: hostDocuments.notes.body,
     mail: hostDocuments.mail.body,
     slack: hostDocuments.slack.body,
+    docs: hostDocuments.docs.body,
   };
 }
 
@@ -130,6 +153,8 @@ export function createInitialState(): StudioState {
     preview: "",
     action: "correct",
     tone: "professional",
+    length: "same",
+    showDiff: false,
     status: "Ready",
     isWorking: false,
     isError: false,
@@ -144,15 +169,27 @@ export function createInitialState(): StudioState {
     presets: defaultPresets,
     selectedPresetId: defaultPresets[0].id,
     history: [],
-    lastReplacement: null,
+    historyQuery: "",
+    historyAction: "all",
+    undoStack: [],
+    redoStack: [],
+    toast: null,
     clock: "9:41",
   };
 }
 
-function reducer(state: StudioState, action: Action): StudioState {
+export function reduceStudio(state: StudioState, action: Action): StudioState {
   switch (action.type) {
     case "hydrate":
-      return { ...state, ...action.state, isWorking: false, menuOpen: false, panelOpen: false };
+      return {
+        ...state,
+        ...action.state,
+        isWorking: false,
+        menuOpen: false,
+        panelOpen: false,
+        toast: null,
+        documents: { ...emptyDocuments(), ...action.state.documents },
+      };
     case "set-host":
       return { ...state, host: action.host, selection: null };
     case "set-document":
@@ -163,6 +200,10 @@ function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, action: action.action };
     case "set-tone":
       return { ...state, tone: action.tone };
+    case "set-length":
+      return { ...state, length: action.length };
+    case "toggle-diff":
+      return { ...state, showDiff: !state.showDiff };
     case "open-panel":
       return {
         ...state,
@@ -184,11 +225,7 @@ function reducer(state: StudioState, action: Action): StudioState {
     case "toggle-history":
       return { ...state, historyOpen: action.open ?? !state.historyOpen, menuOpen: false };
     case "set-onboarding":
-      return {
-        ...state,
-        onboardingOpen: action.open,
-        onboardingStep: action.step ?? state.onboardingStep,
-      };
+      return { ...state, onboardingOpen: action.open, onboardingStep: action.step ?? state.onboardingStep };
     case "working":
       return {
         ...state,
@@ -200,11 +237,7 @@ function reducer(state: StudioState, action: Action): StudioState {
         original: action.original ?? state.original,
       };
     case "partial":
-      return {
-        ...state,
-        preview: action.preview,
-        status: `Writing… ${action.preview.length} characters`,
-      };
+      return { ...state, preview: action.preview, status: `Writing… ${action.preview.length} characters` };
     case "ready":
       return {
         ...state,
@@ -215,49 +248,70 @@ function reducer(state: StudioState, action: Action): StudioState {
         status: action.usageLabel ? `Ready to replace · ${action.usageLabel}` : "Ready to replace",
       };
     case "fail":
-      return { ...state, isWorking: false, isError: true, status: action.status };
+      return { ...state, isWorking: false, isError: true, status: action.status, toast: { message: action.status, kind: "error" } };
     case "status":
       return { ...state, status: action.status, isError: action.isError ?? false };
     case "apply": {
       const body = state.documents[state.host];
-      const next = body.slice(0, action.start) + action.rewritten + body.slice(action.end);
+      const applied = applyReplacement(body, action.start, action.end, action.rewritten);
       return {
         ...state,
-        documents: { ...state.documents, [state.host]: next },
-        lastReplacement: {
-          start: action.start,
-          end: action.start + action.rewritten.length,
-          original: body.slice(action.start, action.end),
-          rewritten: action.rewritten,
-        },
-        selection: { start: action.start, end: action.start + action.rewritten.length },
+        documents: { ...state.documents, [state.host]: applied.next },
+        undoStack: [...state.undoStack, { ...applied.entry, host: state.host }],
+        redoStack: [],
+        selection: { start: applied.entry.start, end: applied.entry.end },
         panelOpen: false,
         isWorking: false,
         status: "Replaced",
         isError: false,
+        toast: { message: "Replaced in the draft", kind: "ok" },
       };
     }
     case "undo": {
-      if (!state.lastReplacement) {
-        return { ...state, status: "There is no replacement to undo yet.", isError: true };
+      const last = state.undoStack.at(-1);
+      if (!last) {
+        return { ...state, status: "There is no replacement to undo yet.", isError: true, toast: { message: "Nothing to undo", kind: "error" } };
       }
-      const { start, end, original } = state.lastReplacement;
-      const body = state.documents[state.host];
-      const next = body.slice(0, start) + original + body.slice(end);
+      const body = state.documents[last.host as HostId] ?? state.documents[state.host];
+      const next = undoReplacement(body, last);
       return {
         ...state,
-        documents: { ...state.documents, [state.host]: next },
-        lastReplacement: null,
-        selection: { start, end: start + original.length },
+        documents: { ...state.documents, [last.host]: next },
+        undoStack: state.undoStack.slice(0, -1),
+        redoStack: [...state.redoStack, last],
+        host: last.host as HostId,
+        selection: { start: last.start, end: last.start + last.original.length },
         status: "Undid last replace",
         isError: false,
+        toast: { message: "Undid last replace", kind: "ok" },
+      };
+    }
+    case "redo": {
+      const last = state.redoStack.at(-1);
+      if (!last) {
+        return { ...state, status: "There is nothing to redo yet.", isError: true, toast: { message: "Nothing to redo", kind: "error" } };
+      }
+      const body = state.documents[last.host as HostId] ?? state.documents[state.host];
+      const next = redoReplacement(body, last);
+      return {
+        ...state,
+        documents: { ...state.documents, [last.host]: next },
+        redoStack: state.redoStack.slice(0, -1),
+        undoStack: [...state.undoStack, last],
+        host: last.host as HostId,
+        selection: { start: last.start, end: last.end },
+        status: "Redid last replace",
+        isError: false,
+        toast: { message: "Redid last replace", kind: "ok" },
       };
     }
     case "record-history":
       return { ...state, history: [action.entry, ...state.history].slice(0, 40) };
     case "clear-history":
-      return { ...state, history: [] };
-    case "restore-history":
+      return { ...state, history: [], toast: { message: "History cleared", kind: "ok" } };
+    case "restore-history": {
+      const body = state.documents[state.host];
+      const found = body.indexOf(action.entry.original);
       return {
         ...state,
         original: action.entry.original,
@@ -266,17 +320,28 @@ function reducer(state: StudioState, action: Action): StudioState {
         tone: action.entry.tone,
         panelOpen: true,
         historyOpen: false,
+        selection: found >= 0 ? { start: found, end: found + action.entry.original.length } : state.selection,
         status: "Restored from history",
         isError: false,
+        toast: { message: "Restored a previous rewrite", kind: "ok" },
       };
-    case "update-settings":
-      return { ...state, settings: { ...state.settings, ...action.settings } };
+    }
+    case "history-query":
+      return { ...state, historyQuery: action.query };
+    case "history-action":
+      return { ...state, historyAction: action.action };
+    case "update-settings": {
+      const settings = { ...state.settings, ...action.settings };
+      const shortcut = settings.shortcut;
+      if (!shortcut.alt && !shortcut.shift && !shortcut.meta && !shortcut.ctrl) {
+        settings.shortcut = { ...shortcut, alt: true, shift: true };
+      }
+      return { ...state, settings };
+    }
     case "set-presets":
-      return {
-        ...state,
-        presets: action.presets,
-        selectedPresetId: action.selectedPresetId ?? state.selectedPresetId,
-      };
+      return { ...state, presets: action.presets, selectedPresetId: action.selectedPresetId ?? state.selectedPresetId };
+    case "toast":
+      return { ...state, toast: action.toast };
     case "tick":
       return { ...state, clock: action.clock };
     case "idle":
@@ -298,10 +363,14 @@ function persistable(state: StudioState) {
     documents: state.documents,
     action: state.action,
     tone: state.tone,
+    length: state.length,
+    showDiff: state.showDiff,
     settings: state.settings,
     presets: state.presets,
     selectedPresetId: state.selectedPresetId,
     history: state.settings.historyEnabled ? state.history : [],
+    undoStack: state.undoStack,
+    redoStack: state.redoStack,
     onboardingOpen: state.onboardingOpen,
     onboardingStep: state.onboardingStep,
   };
@@ -333,7 +402,7 @@ function bindActions(
     }
   };
 
-  const generate = async (nextAction = state.action, nextTone = state.tone) => {
+  const generate = async (nextAction = state.action, nextTone = state.tone, nextLength = state.length) => {
     const text = state.original || selectedText();
     try {
       validateSelection(text);
@@ -347,17 +416,19 @@ function bindActions(
     abortRef.current = controller;
     dispatch({ type: "set-action", action: nextAction });
     dispatch({ type: "set-tone", tone: nextTone });
+    dispatch({ type: "set-length", length: nextLength });
     dispatch({ type: "working", original: text });
 
     try {
-      if (state.settings.provider !== "demo" && state.settings.provider === "openAI") {
+      if (state.settings.provider === "openAI") {
         validateAPIKey(state.settings.apiKey);
       }
       const preset = state.presets.find((item) => item.id === state.selectedPresetId) ?? null;
+      const extras = { length: nextLength, preset, customInstructions: state.settings.customInstructions };
       const onPartial = (preview: string) => dispatch({ type: "partial", preview });
       const result =
         state.settings.provider === "demo"
-          ? await streamDemo(text, nextAction, nextTone, onPartial, controller.signal)
+          ? await streamDemo(text, nextAction, nextTone, onPartial, controller.signal, 8, extras)
           : await streamRemote(
               text,
               nextAction,
@@ -373,6 +444,7 @@ function bindActions(
                 authStyle: state.settings.authStyle,
                 apiVersion: state.settings.apiVersion,
               },
+              nextLength,
               onPartial,
               controller.signal,
             );
@@ -395,12 +467,7 @@ function bindActions(
       dispatch({ type: "fail", status: "Select text, rewrite it, then replace." });
       return;
     }
-    dispatch({
-      type: "apply",
-      start: state.selection.start,
-      end: state.selection.end,
-      rewritten: state.preview,
-    });
+    dispatch({ type: "apply", start: state.selection.start, end: state.selection.end, rewritten: state.preview });
     if (state.settings.historyEnabled) {
       dispatch({
         type: "record-history",
@@ -420,6 +487,7 @@ function bindActions(
     if (!state.preview) return;
     await navigator.clipboard.writeText(state.preview);
     dispatch({ type: "status", status: "Copied" });
+    dispatch({ type: "toast", toast: { message: "Copied rewrite", kind: "ok" } });
     if (state.settings.historyEnabled) {
       dispatch({
         type: "record-history",
@@ -441,19 +509,26 @@ function bindActions(
     dispatch({ type: "close-panel" });
   };
 
-  return { openPanel, generate, apply, copyPreview, cancel };
+  const ping = async () => {
+    const result = await testConnection(state.settings);
+    dispatch({ type: "toast", toast: { message: result.message, kind: result.ok ? "ok" : "error" } });
+    return result.message;
+  };
+
+  return { openPanel, generate, apply, copyPreview, cancel, ping, selectedText };
 }
 
 export function StudioProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
+  const [state, dispatch] = useReducer(reduceStudio, undefined, createInitialState);
   const abortRef = useRef<AbortController | null>(null);
-  const hydrated = useRef(false);
+  const [ready, setReady] = useState(false);
+  const persistSnapshot = useRef("");
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(storageKey);
+      const raw = localStorage.getItem(storageKey) ?? localStorage.getItem("tajpo.studio.v1");
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StudioState> & { completedOnboarding?: boolean };
+        const parsed = JSON.parse(raw) as Partial<StudioState>;
         dispatch({
           type: "hydrate",
           state: {
@@ -465,26 +540,36 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {
       /* keep defaults */
     }
-    hydrated.current = true;
+    setReady(true);
   }, []);
 
   useEffect(() => {
-    if (!hydrated.current) return;
-    localStorage.setItem(storageKey, JSON.stringify(persistable(state)));
+    if (!ready) return;
+    const snapshot = JSON.stringify(persistable(state));
+    if (snapshot === persistSnapshot.current) return;
+    persistSnapshot.current = snapshot;
+    localStorage.setItem(storageKey, snapshot);
     if (!state.onboardingOpen) localStorage.setItem("tajpo.studio.onboarded", "1");
-  }, [state]);
+  }, [ready, state]);
 
   useEffect(() => {
     const tick = () => {
-      dispatch({
-        type: "tick",
-        clock: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-      });
+      dispatch({ type: "tick", clock: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) });
     };
     tick();
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = state.settings.theme;
+  }, [state.settings.theme]);
+
+  useEffect(() => {
+    if (!state.toast) return;
+    const id = window.setTimeout(() => dispatch({ type: "toast", toast: null }), 2400);
+    return () => window.clearTimeout(id);
+  }, [state.toast]);
 
   const actions = useMemo(() => bindActions(state, dispatch, abortRef), [state]);
 
@@ -492,7 +577,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       const shortcut = state.settings.shortcut;
       const key = event.key.toLowerCase();
+      const hasModifier = shortcut.alt || shortcut.shift || shortcut.meta || shortcut.ctrl;
       const matchesShortcut =
+        hasModifier &&
         key === shortcut.key.toLowerCase() &&
         event.altKey === shortcut.alt &&
         event.shiftKey === shortcut.shift &&
@@ -503,12 +590,41 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         actions.openPanel();
         return;
       }
+      if ((event.metaKey || event.ctrlKey) && key === "z" && !event.shiftKey && !state.panelOpen) {
+        const target = event.target as HTMLElement | null;
+        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
+        event.preventDefault();
+        dispatch({ type: "undo" });
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && (key === "y" || (key === "z" && event.shiftKey))) {
+        const target = event.target as HTMLElement | null;
+        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT") && !state.panelOpen) return;
+        event.preventDefault();
+        dispatch({ type: "redo" });
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        dispatch({ type: "toggle-settings", open: true });
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === "h") {
+        event.preventDefault();
+        dispatch({ type: "toggle-history", open: true });
+        return;
+      }
       if (!state.panelOpen) return;
+      if ((event.metaKey || event.ctrlKey) && key === "d") {
+        event.preventDefault();
+        dispatch({ type: "toggle-diff" });
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         actions.cancel();
       }
-      if (event.key === "Enter" && event.metaKey) {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         actions.apply();
       }
@@ -526,12 +642,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             "continueWriting",
           ] as RewriteAction[]
         )[Number(event.key) - 1];
-        if (next) void actions.generate(next, state.tone);
+        if (next) void actions.generate(next, state.tone, state.length);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, state.panelOpen, state.settings.shortcut, state.tone]);
+  }, [actions, state.panelOpen, state.settings.shortcut, state.tone, state.length]);
 
   return <StudioContext.Provider value={{ state, dispatch, actions }}>{children}</StudioContext.Provider>;
 }
@@ -544,6 +660,10 @@ export function useStudio() {
 
 export function shortcutLabel(shortcut: StudioSettings["shortcut"]): string {
   return `${shortcut.ctrl ? "⌃" : ""}${shortcut.alt ? "⌥" : ""}${shortcut.shift ? "⇧" : ""}${shortcut.meta ? "⌘" : ""}${shortcut.key.toUpperCase()}`;
+}
+
+export function visibleHistory(state: StudioState): HistoryEntry[] {
+  return filterHistory(state.history, state.historyQuery, state.historyAction);
 }
 
 export { defaultSettings };

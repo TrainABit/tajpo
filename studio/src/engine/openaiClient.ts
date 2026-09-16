@@ -1,5 +1,5 @@
 import { systemPrompt, temperatureFor } from "./prompts";
-import type { RewriteAction, RewriteTone, WritingPreset } from "./types";
+import type { LLMAuthStyle, LLMProvider, RewriteAction, RewriteLength, RewriteTone, WritingPreset } from "./types";
 import { chatCompletionsURL, TajpoError } from "./validators";
 import type { RewriteResultLike } from "./demoRewriter";
 
@@ -18,6 +18,7 @@ export async function streamRemote(
   preset: WritingPreset | null,
   customInstructions: string,
   options: RemoteClientOptions,
+  length: RewriteLength = "same",
   onPartial: (value: string) => void,
   signal?: AbortSignal,
 ): Promise<RewriteResultLike> {
@@ -40,7 +41,7 @@ export async function streamRemote(
       stream: true,
       stream_options: { include_usage: true },
       messages: [
-        { role: "system", content: systemPrompt(action, tone, preset, customInstructions) },
+        { role: "system", content: systemPrompt(action, tone, preset, customInstructions, length) },
         { role: "user", content: text },
       ],
     }),
@@ -111,4 +112,32 @@ function parseAPIError(body: string, status: number): string {
     /* keep fallback */
   }
   return `HTTP ${status}`;
+}
+
+export async function testConnection(options: {
+  provider: LLMProvider;
+  baseURL: string;
+  model: string;
+  apiKey: string;
+  authStyle: LLMAuthStyle;
+  apiVersion?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  if (options.provider === "demo") {
+    return { ok: true, message: "Demo engine is ready. Nothing leaves this browser." };
+  }
+  const trimmed = (options.baseURL || (options.provider === "openAI" ? "https://api.openai.com/v1" : "http://127.0.0.1:11434/v1"))
+    .trim()
+    .replace(/\/+$/, "");
+  if (!trimmed) return { ok: false, message: "Add a base URL first." };
+  try {
+    const headers: Record<string, string> = {};
+    if (options.authStyle === "bearer" && options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
+    if (options.authStyle === "apiKeyHeader" && options.apiKey) headers["api-key"] = options.apiKey;
+    const response = await fetch(`${trimmed}/models`, { headers });
+    if (response.status === 429) return { ok: false, message: "Rate limited. Wait and retry." };
+    if (!response.ok) return { ok: false, message: `Could not reach ${trimmed} (HTTP ${response.status}).` };
+    return { ok: true, message: `Connected to ${trimmed}. Model ${options.model || "unspecified"} is ready to try.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The local or remote server did not respond." };
+  }
 }

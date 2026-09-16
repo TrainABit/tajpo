@@ -17,6 +17,17 @@ export type RewriteTone = (typeof rewriteTones)[number];
 
 export type LLMProvider = "demo" | "openAI" | "localCompatible";
 export type LLMAuthStyle = "bearer" | "apiKeyHeader" | "none";
+export type RewriteLength = "shorter" | "same" | "longer";
+export type StudioTheme = "dark" | "light";
+
+export interface HistoryEntry {
+  id: string;
+  createdAt: string;
+  action: RewriteAction;
+  tone: RewriteTone;
+  original: string;
+  result: string;
+}
 
 export interface WritingPreset {
   id: string;
@@ -81,24 +92,36 @@ export const defaultPresets: WritingPreset[] = [
   },
 ];
 
-export const hosts = ["notes", "mail", "slack"] as const;
+export const hosts = ["notes", "mail", "slack", "docs"] as const;
 export type HostId = (typeof hosts)[number];
 
-export const hostDocuments: Record<HostId, { title: string; subtitle: string; body: string }> = {
+export const hostDocuments: Record<
+  HostId,
+  { title: string; subtitle: string; body: string; chrome: string }
+> = {
   notes: {
     title: "Notes",
     subtitle: "Draft",
+    chrome: "Quick note",
     body: "tajpo make this sentance better so i can really just send it to the team today.",
   },
   mail: {
     title: "Mail",
     subtitle: "To design",
+    chrome: "To: design@example.com  ·  Subject: Tomorrow",
     body: "i wanted to reach out in order to utilize this time and recieve feedback. maybe we can definately meet tomorrow.",
   },
   slack: {
     title: "Slack",
     subtitle: "#writing",
+    chrome: "#writing  ·  thread with Maya",
     body: "hey can we actually just ship the rewrite panel today i think its ready and it would be usefull",
+  },
+  docs: {
+    title: "Pages",
+    subtitle: "Product brief",
+    chrome: "Brief · Untitled",
+    body: "this brief need to recieve comments so we can actually just decide the next step. i think we should utilize the time we have in order to ship something usefull.",
   },
 };
 

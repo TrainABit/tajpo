@@ -1,12 +1,18 @@
 import lexiconJson from "../../../Sources/TajpoCore/Resources/demo-lexicon.json";
-import type { DemoLexicon, RewriteAction, RewriteTone } from "./types";
+import { applyCustomInstructions } from "./style";
+import type { DemoLexicon, RewriteAction, RewriteLength, RewriteTone, WritingPreset } from "./types";
 
 export const demoLexicon = lexiconJson as DemoLexicon;
 
 export class DemoRewriter {
   constructor(private readonly lexicon: DemoLexicon = demoLexicon) {}
 
-  rewrite(text: string, action: RewriteAction, tone: RewriteTone): string {
+  rewrite(
+    text: string,
+    action: RewriteAction,
+    tone: RewriteTone,
+    extras: { length?: RewriteLength; preset?: WritingPreset | null; customInstructions?: string } = {},
+  ): string {
     const source = text.trim();
     if (!source) return source;
     let output: string;
@@ -39,7 +45,35 @@ export class DemoRewriter {
         output = this.continueWriting(this.correct(source));
         break;
     }
-        return action === "bullets" ? this.tidy(output) : this.capitalizeSentences(this.tidy(output));
+    output = this.applyPreset(output, extras.preset);
+    output = this.applyLength(output, extras.length ?? "same");
+    output = applyCustomInstructions(output, extras.customInstructions ?? "");
+    return action === "bullets" ? this.tidy(output) : this.capitalizeSentences(this.tidy(output));
+  }
+
+  applyPreset(text: string, preset?: WritingPreset | null): string {
+    if (!preset) return text;
+    const name = preset.name.toLowerCase();
+    const prompt = preset.systemPrompt.toLowerCase();
+    if (name === "concise" || prompt.includes("short sentences") || prompt.includes("cut anything")) {
+      return this.shorten(text);
+    }
+    if (name === "professional" || prompt.includes("professional tone")) {
+      return this.applyTone(text, "professional");
+    }
+    if (name === "casual" || prompt.includes("relaxed")) {
+      return this.applyTone(text, "casual");
+    }
+    if (name === "warm" || prompt.includes("warmth")) {
+      return this.applyTone(text, "friendly");
+    }
+    return text;
+  }
+
+  applyLength(text: string, length: RewriteLength): string {
+    if (length === "shorter") return this.shorten(text);
+    if (length === "longer") return this.expand(text);
+    return text;
   }
 
   correct(text: string): string {
@@ -47,6 +81,7 @@ export class DemoRewriter {
     result = this.replaceMapped(result, this.lexicon.casualSlang);
     result = this.normalizeSpaces(result);
     result = result.replace(/\bi\b/g, "I");
+    result = result.replace(/\b(brief|document|note|draft) need\b/gi, (_, word: string) => `${word} needs`);
     return this.capitalizeSentences(result);
   }
 
@@ -198,8 +233,9 @@ export async function streamDemo(
   onPartial: (value: string) => void,
   signal?: AbortSignal,
   delayMs = 8,
+  extras: { length?: RewriteLength; preset?: WritingPreset | null; customInstructions?: string } = {},
 ): Promise<RewriteResultLike> {
-  const output = new DemoRewriter().rewrite(text, action, tone);
+  const output = new DemoRewriter().rewrite(text, action, tone, extras);
   let partial = "";
   for (const character of output) {
     if (signal?.aborted) throw new DOMException("The rewrite was cancelled.", "AbortError");
