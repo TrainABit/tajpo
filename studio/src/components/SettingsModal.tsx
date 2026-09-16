@@ -148,9 +148,10 @@ export function SettingsModal() {
             <p className="hint">
               {state.presets.find((item) => item.id === state.selectedPresetId)?.systemPrompt}
             </p>
-            <label className="stack">
+            <label className="stack" htmlFor="custom-instructions">
               Always-on instructions
               <textarea
+                id="custom-instructions"
                 value={state.settings.customInstructions}
                 placeholder='Example: never use the word utilize. No exclamation marks.'
                 onChange={(event) =>

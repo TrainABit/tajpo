@@ -70,7 +70,45 @@ await page.getByRole("button", { name: "Switch to dark theme" }).click();
 await page.getByRole("tab", { name: "Pages" }).click();
 await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(out, "desktop_pages.png") });
+await page.getByRole("tab", { name: "Slack" }).click();
+await page.waitForTimeout(250);
+await page.screenshot({ path: path.join(out, "desktop_slack.png") });
 await page.getByRole("tab", { name: "Notes" }).click();
+
+await page.getByRole("button", { name: "File" }).click();
+await page.getByRole("menuitem", { name: "Settings…" }).click();
+await page.getByRole("tab", { name: "writing" }).click();
+await page.getByLabel("Always-on instructions").fill("never use the word Tajpo. No exclamation marks.");
+await page.getByRole("button", { name: "Close" }).click();
+await page.getByRole("button", { name: "Select all" }).click();
+await page.keyboard.press("Alt+Shift+T");
+await page.getByRole("button", { name: "Replace" }).waitFor({ state: "visible" });
+await page.waitForFunction(() => {
+  const button = [...document.querySelectorAll("button")].find((el) => el.textContent?.trim() === "Replace");
+  return button && !button.disabled;
+});
+await page.getByRole("button", { name: "Longer" }).click();
+await page.waitForFunction(() => {
+  const button = [...document.querySelectorAll("button")].find((el) => el.textContent?.trim() === "Replace");
+  return button && !button.disabled;
+});
+await page.getByRole("button", { name: "Show diff" }).click();
+await page.waitForTimeout(400);
+await page.screenshot({ path: path.join(out, "rewrite_diff_length.png") });
+await page.getByRole("button", { name: "Replace" }).click();
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: "Edit" }).click();
+await page.getByRole("menuitem", { name: "Undo replace" }).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(out, "undo_replace.png") });
+await page.getByRole("button", { name: "Edit" }).click();
+await page.getByRole("menuitem", { name: "Redo replace" }).click();
+await page.getByRole("button", { name: "File" }).click();
+await page.getByRole("menuitem", { name: "History" }).click();
+await page.getByPlaceholder("Search original, rewrite, action…").fill("make");
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(out, "history_search.png") });
+await page.getByRole("button", { name: "Close" }).first().click();
 
 await editor.click();
 await page.keyboard.press("End");

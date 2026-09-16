@@ -82,7 +82,7 @@ test("theme, connection test, custom instructions, undo, and history search", as
   await page.getByRole("button", { name: "Test connection" }).click();
   await expect(page.getByRole("status")).toContainText(/demo engine is ready/i);
   await page.getByRole("tab", { name: "writing" }).click();
-  await page.locator("textarea").first().fill("never use the word Tajpo");
+  await page.getByLabel("Always-on instructions").fill("never use the word Tajpo");
   await page.getByRole("button", { name: "Close" }).click();
 
   const editor = page.locator("#tajpo-editor");
