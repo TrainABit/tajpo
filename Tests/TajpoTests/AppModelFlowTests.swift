@@ -25,6 +25,7 @@ struct ScriptedLLMClient: LLMClient, Sendable {
     settings.provider = .openAI
     let model = AppModel(
         settings: settings,
+        presets: PresetStore(),
         history: HistoryStore(defaults: UserDefaults(suiteName: "tajpo.tests.flow") ?? .standard, key: "flow", enabled: true),
         selection: selection,
         keyStore: keys,

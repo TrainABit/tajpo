@@ -34,20 +34,41 @@ public final class AppModel: ObservableObject {
     private var lastTone: RewriteTone?
     private var accessibilityTask: Task<Void, Never>?
 
-    public init(
+    public static func liveClient(endpoint: LLMEndpoint, apiKey: String) -> any LLMClient {
+        OpenAICompatibleClient(endpoint: endpoint, apiKey: apiKey)
+    }
+
+    public convenience init(
         settings: AppSettings = AppSettings(),
         presets: PresetStore = PresetStore(),
-        history: HistoryStore? = nil,
         selection: TextSelectionServing = TextSelectionService(),
         keyStore: APIKeyStoring = KeychainAPIKeyStore(),
         startAutomatically: Bool = true,
-        makeClient: @escaping @Sendable (LLMEndpoint, String) -> any LLMClient = { endpoint, key in
-            OpenAICompatibleClient(endpoint: endpoint, apiKey: key)
-        }
+        makeClient: @escaping @Sendable (LLMEndpoint, String) -> any LLMClient = AppModel.liveClient
+    ) {
+        self.init(
+            settings: settings,
+            presets: presets,
+            history: HistoryStore(enabled: settings.historyEnabled),
+            selection: selection,
+            keyStore: keyStore,
+            startAutomatically: startAutomatically,
+            makeClient: makeClient
+        )
+    }
+
+    public init(
+        settings: AppSettings,
+        presets: PresetStore,
+        history: HistoryStore,
+        selection: TextSelectionServing,
+        keyStore: APIKeyStoring,
+        startAutomatically: Bool,
+        makeClient: @escaping @Sendable (LLMEndpoint, String) -> any LLMClient
     ) {
         self.settings = settings
         self.presets = presets
-        self.history = history ?? HistoryStore(enabled: settings.historyEnabled)
+        self.history = history
         self.selection = selection
         self.keyStore = keyStore
         self.makeClient = makeClient

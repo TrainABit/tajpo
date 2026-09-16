@@ -62,10 +62,12 @@ import Testing
     let selection = MockTextSelectionService(capturedText: "teh fox")
     let model = AppModel(
         settings: settings,
+        presets: PresetStore(),
         history: HistoryStore(defaults: UserDefaults(suiteName: "tajpo.tests.demo") ?? .standard, key: "demo", enabled: true),
         selection: selection,
         keyStore: InMemoryAPIKeyStore(),
-        startAutomatically: false
+        startAutomatically: false,
+        makeClient: AppModel.liveClient
     )
     await model.openInlineRewrite()
     await model.runCurrentCapture()
