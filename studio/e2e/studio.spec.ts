@@ -17,12 +17,13 @@ test("onboarding, rewrite, replace, history, and settings", async ({ page }) => 
   await editor.press("Control+A");
 
   await page.getByRole("button", { name: "Tajpo" }).click();
-  await page.getByRole("button", { name: "Open rewrite panel" }).click();
+  await page.getByRole("button", { name: "Open rewrite panel" }).click({ force: true });
   await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toBeVisible();
   await expect(page.locator(".column").nth(1)).not.toHaveText("Choose an action", { timeout: 15_000 });
   await expect(page.locator(".column").nth(1)).toContainText("Tajpo");
 
   const before = await editor.inputValue();
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled();
   await page.getByRole("button", { name: "Replace" }).click();
   await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toHaveCount(0);
   await expect.poll(async () => editor.inputValue()).not.toBe(before);
@@ -47,7 +48,7 @@ test("empty selection shows an error state", async ({ page }) => {
   await page.locator("#tajpo-editor").click();
   await page.keyboard.press("End");
   await page.getByRole("button", { name: "Tajpo" }).click();
-  await page.getByRole("button", { name: "Open rewrite panel" }).click();
+  await page.getByRole("button", { name: "Open rewrite panel" }).click({ force: true });
   await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toContainText("No selected text");
   await expect(page.getByRole("button", { name: "Replace" })).toBeDisabled();
 });

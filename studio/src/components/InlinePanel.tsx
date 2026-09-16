@@ -19,7 +19,7 @@ export function InlinePanel() {
         <h3 style={{ margin: 0, fontFamily: "var(--serif)" }}>Tajpo</h3>
         <span className={`status-pill ${state.isError ? "error" : ""}`}>{state.status}</span>
       </div>
-      <div className="chips" style={{ gridTemplateColumns: "repeat(9, minmax(0, 1fr))" }}>
+      <div className="chips" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))" }}>
         {rewriteActions.map((action) => (
           <button
             key={action}
@@ -54,7 +54,7 @@ export function InlinePanel() {
           <span style={{ width: `${Math.max(progress * 100, 8)}%` }} />
         </div>
       ) : null}
-      <div className="panel columns">
+      <div className="columns">
         <div>
           <div className="eyebrow">Original</div>
           <div className={`column ${state.original ? "" : "empty"}`}>

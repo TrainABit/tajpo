@@ -13,7 +13,7 @@ export function App() {
   return (
     <div className="desktop">
       <MenuBar />
-      <main className="stage">
+      <main className="stage" onClick={() => (state.menuOpen ? dispatch({ type: "toggle-menu", open: false }) : undefined)}>
         <div className="host-switcher" role="tablist" aria-label="Sample host apps">
           {hosts.map((host) => (
             <button
