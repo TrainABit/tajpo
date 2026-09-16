@@ -62,4 +62,52 @@ test("mail host and onboarding continue finish the first-run flow", async ({ pag
   await page.getByRole("tab", { name: "Mail" }).click();
   await expect(page.getByRole("heading", { name: "Mail" })).toBeVisible();
   await expect(page.locator("#tajpo-editor")).toContainText("reach out");
+  await page.getByRole("tab", { name: "Pages" }).click();
+  await expect(page.getByRole("heading", { name: "Pages" })).toBeVisible();
+  await expect(page.locator("#tajpo-editor")).toContainText("brief");
+});
+
+test("theme, connection test, custom instructions, undo, and history search", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.getByRole("button", { name: "Switch to light theme" }).click();
+  await expect(page.locator(".desktop")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  await expect(page.locator(".desktop")).toHaveAttribute("data-theme", "dark");
+
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("menuitem", { name: "Settings…" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(page.getByText(/demo engine is ready/i)).toBeVisible();
+  await page.getByRole("tab", { name: "writing" }).click();
+  await page.locator("textarea").first().fill("never use the word Tajpo");
+  await page.getByRole("button", { name: "Close" }).click();
+
+  const editor = page.locator("#tajpo-editor");
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.keyboard.press("Alt+Shift+T");
+  const panel = page.getByRole("dialog", { name: "Tajpo rewrite panel" });
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+  await expect(page.locator(".column").nth(1)).not.toContainText("Tajpo");
+  const before = await editor.inputValue();
+  await page.getByRole("button", { name: "Replace" }).click();
+  await expect.poll(async () => editor.inputValue()).not.toBe(before);
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("menuitem", { name: "Undo replace" }).click();
+  await expect.poll(async () => editor.inputValue()).toBe(before);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("menuitem", { name: "Redo replace" }).click();
+  await expect.poll(async () => editor.inputValue()).not.toBe(before);
+
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("menuitem", { name: "History" }).click();
+  await expect(page.getByRole("complementary", { name: "Rewrite history" })).toBeVisible();
+  await page.getByPlaceholder("Search original, rewrite, action…").fill("zzzz-missing");
+  await expect(page.getByText("No history matches that search.")).toBeVisible();
+  await page.getByPlaceholder("Search original, rewrite, action…").fill("make");
+  await expect(page.getByRole("complementary")).toContainText("Correct");
 });

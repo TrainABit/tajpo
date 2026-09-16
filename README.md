@@ -18,9 +18,10 @@ License: MIT. See `LICENSE`.
 - Secure-field rejection, including ancestor/descendant password roles, bullet-only selections, and no clipboard fallback in web areas
 - On-device demo engine, OpenAI Chat Completions, Azure-compatible endpoints, and local `/v1` servers
 - Correct, improve, rewrite, shorten, tone, expand, simplify, bullets, and continue
+- Length control (shorter / same / longer) applied by the demo engine and sent to remote models
 - Recordable global shortcut (requires at least one modifier)
-- Inline panel with original vs streamed rewrite, token/cost readout, Replace / Copy / Retry / Undo
-- Writing presets, custom instructions, optional local history, launch at login, Accessibility status, GitHub Releases update check
+- Inline panel with original vs streamed rewrite, optional word diff, token/cost readout, Replace / Copy / Retry / Undo / Redo
+- Writing presets, custom instructions, searchable local history, launch at login, Accessibility status, GitHub Releases update check
 - First-run onboarding that can finish on the demo engine with no API key
 
 ## Run Tajpo Studio (this environment)
@@ -34,7 +35,16 @@ npm test
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. Skip or finish onboarding, select text in the paper window, press **⌥⇧T** (Alt+Shift+T), then Replace.
+Open `http://127.0.0.1:5173`. Skip or finish onboarding, select text in the paper window (Notes, Mail, Slack, or Pages), press **⌥⇧T** (Alt+Shift+T), then Replace.
+
+Studio is a finished local workbench, not a screenshot of the Mac app:
+
+- Dark and light desktop themes
+- Length controls, writing presets, and always-on custom instructions (the demo engine honors “never use the word …” and “no exclamation”)
+- History search, filter, and replay
+- Multi-step undo / redo of replacements
+- Provider settings with a real Test connection (`GET /models` for remote, instant ready for demo)
+- Keyboard: Alt+Shift+T (or your shortcut), 1–9 actions, Ctrl/⌘Enter replace, Esc close, Ctrl/⌘Z undo, Ctrl/⌘Y redo, Ctrl/⌘D diff, Ctrl/⌘, settings
 
 Production-like preview:
 

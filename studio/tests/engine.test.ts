@@ -20,16 +20,18 @@ describe("prompts", () => {
     expect(prompt).toContain(antiSlop);
   });
 
-  it("includes custom instructions and tone lock", () => {
+  it("includes custom instructions, tone lock, and length", () => {
     const prompt = systemPrompt(
       "changeTone",
       "confident",
       { id: "p", name: "House", systemPrompt: "Use short sentences." },
       "Never use the word synergy.",
+      "shorter",
     );
     expect(prompt).toContain("confident");
     expect(prompt).toContain("must not override the requested confident tone");
     expect(prompt).toContain("Never use the word synergy.");
+    expect(prompt).toContain("shorter than the source");
   });
 
   it("uses zero temperature for correct and bullets", () => {
@@ -105,5 +107,31 @@ describe("demo rewriter", () => {
     const result = rewriter.rewrite("Ship the rewrite panel.", "continueWriting", "casual");
     expect(result.startsWith("Ship the rewrite panel.")).toBe(true);
     expect(result).toContain("next step");
+  });
+
+  it("applies concise preset and shorter length", () => {
+    const longer = rewriter.rewrite("We did this due to the fact that it was necessary", "correct", "professional");
+    const concise = rewriter.rewrite("We did this due to the fact that it was necessary", "correct", "professional", {
+      preset: { id: "concise", name: "Concise", systemPrompt: "Prefer short sentences and concrete verbs. Cut anything that does not carry information." },
+    });
+    expect(concise.toLowerCase()).not.toContain("due to the fact");
+    expect(concise.length).toBeLessThanOrEqual(longer.length);
+    expect(rewriter.rewrite("We need this.", "correct", "casual", { length: "longer" })).toContain(
+      "That is the point to keep in view.",
+    );
+  });
+
+  it("honors never-use-word and no-exclamation instructions", () => {
+    const result = rewriter.rewrite("Tajpo is useful!", "correct", "casual", {
+      customInstructions: 'never use the word Tajpo. No exclamation marks.',
+    });
+    expect(result.toLowerCase()).not.toContain("tajpo");
+    expect(result).not.toContain("!");
+  });
+
+  it("fixes brief need agreement", () => {
+    expect(rewriter.rewrite("this brief need to recieve comments", "correct", "professional")).toBe(
+      "This brief needs to receive comments",
+    );
   });
 });
