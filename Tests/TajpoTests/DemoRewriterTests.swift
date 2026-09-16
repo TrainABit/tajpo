@@ -80,6 +80,7 @@ import Testing
     #expect(!result.lowercased().contains("due to the fact"))
 }
 
+@MainActor
 @Test func historyFilterMatchesQuery() {
     let suite = "tajpo.tests.history.filter.\(UUID().uuidString)"
     let store = HistoryStore(defaults: UserDefaults(suiteName: suite)!, key: "entries", enabled: true)
