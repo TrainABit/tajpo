@@ -16,9 +16,11 @@ public final class AppModel: ObservableObject {
     @Published public var hotkeyConfirmed = false
     @Published public var updateMessage = ""
     @Published public var updateURL: URL?
+    @Published public var canUndo = false
 
     public let settings: AppSettings
     public let presets: PresetStore
+    public let history: HistoryStore
 
     private let selection: TextSelectionServing
     private let keyStore: APIKeyStoring
@@ -35,6 +37,7 @@ public final class AppModel: ObservableObject {
     public init(
         settings: AppSettings = AppSettings(),
         presets: PresetStore = PresetStore(),
+        history: HistoryStore? = nil,
         selection: TextSelectionServing = TextSelectionService(),
         keyStore: APIKeyStoring = KeychainAPIKeyStore(),
         startAutomatically: Bool = true,
@@ -44,6 +47,7 @@ public final class AppModel: ObservableObject {
     ) {
         self.settings = settings
         self.presets = presets
+        self.history = history ?? HistoryStore(enabled: settings.historyEnabled)
         self.selection = selection
         self.keyStore = keyStore
         self.makeClient = makeClient
@@ -145,6 +149,8 @@ public final class AppModel: ObservableObject {
         do {
             try await selection.replace(with: preview, capture: capture)
             lastReplacement = (original: capture.text, rewritten: preview, capture: capture)
+            canUndo = true
+            recordHistory(original: capture.text, result: preview)
             showStatus("Replaced")
             panel.close()
         } catch {
@@ -161,6 +167,7 @@ public final class AppModel: ObservableObject {
             try await selection.replace(with: lastReplacement.original, capture: lastReplacement.capture)
             showStatus("Undid last replace")
             self.lastReplacement = nil
+            canUndo = false
         } catch {
             show(error)
         }
@@ -170,7 +177,28 @@ public final class AppModel: ObservableObject {
         guard !preview.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(preview, forType: .string)
+        if let currentCapture {
+            recordHistory(original: currentCapture.text, result: preview)
+        }
         showStatus("Copied")
+    }
+
+    public func restoreHistory(_ entry: RewriteHistoryEntry) {
+        originalText = entry.original
+        preview = entry.result
+        if let action = RewriteAction(rawValue: entry.action) {
+            self.action = action
+        }
+        if let tone = RewriteTone(rawValue: entry.tone) {
+            self.tone = tone
+        }
+        showStatus("Restored from history")
+        panel.show(model: self, near: nil)
+    }
+
+    public func setHistoryEnabled(_ enabled: Bool) {
+        settings.historyEnabled = enabled
+        history.setEnabled(enabled)
     }
 
     public func rewriteSelection() async {
@@ -259,7 +287,7 @@ public final class AppModel: ObservableObject {
             defer { isWorking = false }
             lastAction = action
             lastTone = tone
-            let result = try await client.rewrite(text, action: action, tone: tone, preset: presets.selected) { [weak self] partial in
+            let result = try await client.rewrite(text, action: action, tone: tone, preset: settings.effectivePreset(presets.selected)) { [weak self] partial in
                 self?.preview = partial
                 self?.status = "Writing... \(partial.count) characters"
             }
@@ -284,12 +312,19 @@ public final class AppModel: ObservableObject {
     }
 
     private func makeConfiguredClient() throws -> any LLMClient {
+        if settings.provider == .demo {
+            return DemoClient()
+        }
         let stored = APIKeyValidator.optional(try keyStore.load())
         if settings.provider.requiresAPIKey || settings.authStyle != .none {
             let key = try APIKeyValidator.validate(stored)
             return makeClient(settings.endpoint, key)
         }
         return makeClient(settings.endpoint, stored)
+    }
+
+    private func recordHistory(original: String, result: String) {
+        history.record(action: action, tone: tone, original: original, result: result)
     }
 
     private func showStatus(_ message: String) {

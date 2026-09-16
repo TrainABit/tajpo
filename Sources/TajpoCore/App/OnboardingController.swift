@@ -13,7 +13,7 @@ final class OnboardingController {
             self?.window = nil
         })
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 580, height: 460),
+            contentRect: CGRect(x: 0, y: 0, width: 620, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -29,27 +29,47 @@ final class OnboardingController {
 
 private struct OnboardingView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var settings: AppSettings
     let finish: () -> Void
+
+    init(model: AppModel, finish: @escaping () -> Void) {
+        self.model = model
+        self.settings = model.settings
+        self.finish = finish
+    }
     @State private var step = 0
     @State private var key = ""
     @State private var keyMessage = ""
     @State private var skippedAccessibility = false
     @State private var skippedShortcut = false
     @State private var skippedKey = false
-    @State private var testText = "Tajpo make this sentence better."
+    @State private var testText = "tajpo make this sentance better so i can really just send it."
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                ForEach(0..<titles.count, id: \.self) { index in
+                    Capsule()
+                        .fill(index <= step ? TajpoTheme.copper : Color.primary.opacity(0.12))
+                        .frame(height: 4)
+                }
+            }
             Text(titles[step])
                 .font(.largeTitle.bold())
             Group {
                 switch step {
                 case 0:
-                    Text("Select text anywhere. Tajpo appears beside it, streams a rewrite, and lets you replace, copy, or undo.")
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Select text anywhere. Tajpo appears beside it, streams a rewrite, and lets you replace, copy, or undo.")
+                        Text("It starts with an on-device demo so you can try it without an API key. Switch to OpenAI or a local server when you want a stronger model.")
+                            .foregroundStyle(.secondary)
+                    }
                 case 1:
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tajpo needs Accessibility access only to read and replace text you select.")
                         Button("Request access") { model.requestAccessibility() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(TajpoTheme.copper)
                         statusLine(
                             ok: model.isAccessibilityTrusted,
                             okText: "Accessibility is granted.",
@@ -62,36 +82,53 @@ private struct OnboardingView: View {
                         statusLine(
                             ok: model.hotkeyConfirmed,
                             okText: "Shortcut received.",
-                            missing: "Waiting for \(model.settings.hotkeyLabel)..."
+                            missing: "Waiting for \(model.settings.hotkeyLabel)…"
                         )
                     }
                 case 3:
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(model.settings.provider == .openAI
-                             ? "Save an OpenAI key, or switch to a local server in Settings after setup."
-                             : "A local server does not need a key. You can still save one for compatible APIs.")
-                        SecureField("API key", text: $key)
-                        HStack {
-                            Button("Save securely in Keychain") { saveKey() }
+                        Picker("Provider", selection: $settings.provider) {
+                            ForEach(LLMProvider.allCases) { Text($0.title).tag($0) }
+                        }
+                        .onChange(of: settings.provider) { _, _ in
+                            settings.applyProviderDefaults()
+                        }
+                        if settings.provider == .openAI {
+                            SecureField("OpenAI API key", text: $key)
+                            HStack {
+                                Button("Save securely in Keychain") { saveKey() }
+                                Button("Test connection") {
+                                    Task { keyMessage = await model.testConnection() }
+                                }
+                            }
+                        } else if settings.provider == .localCompatible {
+                            TextField("Local /v1 URL", text: $settings.baseURL)
                             Button("Test connection") {
                                 Task { keyMessage = await model.testConnection() }
                             }
+                        } else {
+                            Text("Demo mode stays on this Mac. You can add a key later in Settings.")
+                                .foregroundStyle(.secondary)
                         }
                         if !keyMessage.isEmpty {
                             Text(keyMessage).font(.caption).foregroundStyle(.secondary)
                         }
                         statusLine(
-                            ok: model.hasSavedAPIKey() || !model.settings.provider.requiresAPIKey,
-                            okText: model.settings.provider.requiresAPIKey ? "A key is saved." : "Local server selected; a key is optional.",
-                            missing: "Save a key or skip if you will use a local server."
+                            ok: settings.provider != .openAI || model.hasSavedAPIKey(),
+                            okText: settings.provider == .demo ? "Demo engine is ready." : "Provider is ready.",
+                            missing: "Save a key or switch to the demo engine."
                         )
                     }
                 default:
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 8) {
                         TextEditor(text: $testText)
-                            .frame(height: 100)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                        Text("Select this text after setup and press your shortcut.")
+                            .font(.body)
+                            .frame(height: 110)
+                            .padding(6)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.quaternary))
+                            .accessibilityLabel("Practice text")
+                        Text("Select this text after setup and press \(model.settings.hotkeyLabel).")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -108,10 +145,12 @@ private struct OnboardingView: View {
                 }
                 .disabled(!canContinue)
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(TajpoTheme.copper)
             }
         }
         .padding(28)
-        .frame(width: 580, height: 460)
+        .frame(width: 620, height: 500)
         .onAppear { model.refreshSystemState() }
     }
 
@@ -122,14 +161,14 @@ private struct OnboardingView: View {
     private var canSkip: Bool {
         (step == 1 && !model.isAccessibilityTrusted)
             || (step == 2 && !model.hotkeyConfirmed)
-            || (step == 3 && model.settings.provider.requiresAPIKey && !model.hasSavedAPIKey())
+            || (step == 3 && settings.provider == .openAI && !model.hasSavedAPIKey())
     }
 
     private var canContinue: Bool {
         switch step {
         case 1: model.isAccessibilityTrusted || skippedAccessibility
         case 2: model.hotkeyConfirmed || skippedShortcut
-        case 3: model.hasSavedAPIKey() || !model.settings.provider.requiresAPIKey || skippedKey
+        case 3: settings.provider != .openAI || model.hasSavedAPIKey() || skippedKey
         default: true
         }
     }
@@ -146,7 +185,7 @@ private struct OnboardingView: View {
     private func statusLine(ok: Bool, okText: String, missing: String) -> some View {
         Text(ok ? okText : missing)
             .font(.caption)
-            .foregroundStyle(ok ? Color.green : Color.secondary)
+            .foregroundStyle(ok ? TajpoTheme.sage : Color.secondary)
     }
 
     private func saveKey() {

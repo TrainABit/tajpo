@@ -1,7 +1,7 @@
 import Foundation
 
 public enum RewriteAction: String, CaseIterable, Identifiable, Sendable {
-    case correct, improve, rewrite, shorten, changeTone
+    case correct, improve, rewrite, shorten, changeTone, expand, simplify, bullets, continueWriting
 
     public var id: String { rawValue }
 
@@ -12,7 +12,29 @@ public enum RewriteAction: String, CaseIterable, Identifiable, Sendable {
         case .rewrite: "Rewrite"
         case .shorten: "Shorten"
         case .changeTone: "Tone"
+        case .expand: "Expand"
+        case .simplify: "Simplify"
+        case .bullets: "Bullets"
+        case .continueWriting: "Continue"
         }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .correct: "Grammar and spelling only"
+        case .improve: "Clearer, same meaning"
+        case .rewrite: "Fresh wording"
+        case .shorten: "Keep the point, cut words"
+        case .changeTone: "Same facts, new voice"
+        case .expand: "Add a little room"
+        case .simplify: "Shorter words"
+        case .bullets: "Turn it into a list"
+        case .continueWriting: "Write the next beat"
+        }
+    }
+
+    public var shortcutDigit: String {
+        String((Self.allCases.firstIndex(of: self) ?? 0) + 1)
     }
 }
 
@@ -42,9 +64,18 @@ public struct WritingPreset: Identifiable, Codable, Hashable, Sendable {
         name: "Casual",
         systemPrompt: "Sound relaxed and human. Use natural contractions where the language supports them. Do not sound performative."
     )
+    public static let concise = WritingPreset(
+        name: "Concise",
+        systemPrompt: "Prefer short sentences and concrete verbs. Cut anything that does not carry information."
+    )
+    public static let warm = WritingPreset(
+        name: "Warm",
+        systemPrompt: "Be considerate and plain. Keep warmth in the voice without cheerleading or exclamation marks."
+    )
 }
 
 public enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
+    case demo
     case openAI
     case localCompatible
 
@@ -52,6 +83,7 @@ public enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
 
     public var title: String {
         switch self {
+        case .demo: "On-device demo"
         case .openAI: "OpenAI"
         case .localCompatible: "Local server (Ollama, llama.cpp, MLX)"
         }
@@ -63,6 +95,7 @@ public enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
 
     public var defaultBaseURL: String {
         switch self {
+        case .demo: ""
         case .openAI: "https://api.openai.com/v1"
         case .localCompatible: "http://127.0.0.1:11434/v1"
         }
@@ -70,6 +103,7 @@ public enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
 
     public var defaultModel: String {
         switch self {
+        case .demo: "tajpo-demo"
         case .openAI: "gpt-4o-mini"
         case .localCompatible: "llama3.2"
         }
@@ -162,7 +196,12 @@ public struct RewriteResult: Equatable, Sendable {
 public enum PromptBuilder {
     public static let antiSlop = "Avoid filler, canned openings, inflated language, fake enthusiasm, generic transitions, repetitive conclusions, and AI-sounding phrases. Do not use em dashes. Keep the author's voice and level of formality."
 
-    public static func systemPrompt(action: RewriteAction, tone: RewriteTone, preset: WritingPreset?) -> String {
+    public static func systemPrompt(
+        action: RewriteAction,
+        tone: RewriteTone,
+        preset: WritingPreset?,
+        customInstructions: String? = nil
+    ) -> String {
         let task: String = switch action {
         case .correct:
             "Correct only grammar, spelling, and punctuation. Do not change meaning, tone, structure, or word choice unless required for correctness."
@@ -174,6 +213,14 @@ public enum PromptBuilder {
             "Make it shorter without losing key information."
         case .changeTone:
             "Rewrite in a \(tone.rawValue) tone while preserving meaning and facts. The requested tone wins if any other style note conflicts."
+        case .expand:
+            "Expand slightly with one or two clarifying sentences. Do not invent facts, numbers, or names."
+        case .simplify:
+            "Rewrite with shorter, more common words. Keep meaning and facts."
+        case .bullets:
+            "Turn the text into a tight bullet list. Keep every fact. Do not add a heading unless the source already has one."
+        case .continueWriting:
+            "Write the next one or two sentences in the same voice. Do not repeat the source. Do not add facts that are not implied."
         }
         let presetClause = preset.map { preset in
             if action == .changeTone {
@@ -182,13 +229,20 @@ public enum PromptBuilder {
                 preset.systemPrompt
             }
         }
-        return [task, presetClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
+        let custom = customInstructions?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let customClause = (custom?.isEmpty == false) ? "Extra instructions from the user: \(custom!)" : nil
+        return [task, presetClause, customClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
             .compactMap { $0 }
             .joined(separator: " ")
     }
 
     public static func temperature(for action: RewriteAction) -> Double {
-        action == .correct ? 0 : 0.3
+        switch action {
+        case .correct, .bullets: 0
+        case .improve, .simplify, .shorten: 0.3
+        case .changeTone, .expand, .rewrite, .continueWriting: 0.5
+        }
     }
 }
 

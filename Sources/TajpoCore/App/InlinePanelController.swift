@@ -11,7 +11,7 @@ final class InlinePanelController {
             model.cancelWork()
             self?.close()
         })
-        let size = NSSize(width: 620, height: 440)
+        let size = NSSize(width: 680, height: 480)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable],
@@ -24,6 +24,8 @@ final class InlinePanelController {
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
         panel.contentView = NSHostingView(rootView: content)
 
         let fallback = NSEvent.mouseLocation
@@ -45,74 +47,109 @@ private struct InlineRewriteView: View {
     let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                ForEach(RewriteAction.allCases) { action in
-                    Button(action.title) {
-                        model.action = action
-                        Task { await model.runCurrentCapture() }
+                Text("Tajpo")
+                    .font(.headline)
+                StatusPill(text: model.status, isError: model.isError, isWorking: model.isWorking)
+                Spacer()
+                Text(model.settings.hotkeyLabel)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(RewriteAction.allCases) { action in
+                        ActionChip(action: action, selected: model.action == action) {
+                            model.action = action
+                            Task { await model.runCurrentCapture() }
+                        }
+                        .keyboardShortcut(KeyEquivalent(action.shortcutDigit.first ?? "0"), modifiers: [])
                     }
-                    .buttonStyle(.bordered)
-                    .tint(model.action == action ? .accentColor : nil)
                 }
             }
+
             if model.action == .changeTone {
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Tone", selection: $model.tone) {
                         ForEach(RewriteTone.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    if model.presets.selected != nil {
-                        Text("The selected tone wins if it conflicts with the \(model.presets.selected?.name ?? "preset") preset.")
+                    .onChange(of: model.tone) { _, _ in
+                        Task { await model.runCurrentCapture() }
+                    }
+                    if let name = model.presets.selected?.name {
+                        Text("Selected tone wins if it conflicts with the \(name) preset.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+
             if model.isWorking {
                 ProgressView(value: progressValue)
                     .progressViewStyle(.linear)
+                    .tint(TajpoTheme.copper)
             }
+
             HStack(alignment: .top, spacing: 12) {
-                textColumn(title: "Original", text: model.originalText, placeholder: "No selection captured.")
+                textColumn(title: "Original", text: model.originalText, placeholder: emptyOriginal, emphasizeError: false)
                 textColumn(
                     title: "Rewrite",
                     text: displayedPreview,
-                    placeholder: model.status,
+                    placeholder: emptyPreview,
                     emphasizeError: model.preview.isEmpty && model.isError
                 )
             }
-            HStack {
+
+            HStack(spacing: 8) {
                 Button("Replace") {
                     Task { await model.applyPreview() }
                 }
-                .disabled(model.preview.isEmpty || model.isWorking)
                 .keyboardShortcut(.return, modifiers: .command)
+                .disabled(model.preview.isEmpty || model.isWorking)
+                .buttonStyle(.borderedProminent)
+                .tint(TajpoTheme.copper)
+
                 Button("Copy") { model.copyPreview() }
                     .disabled(model.preview.isEmpty)
                 Button("Retry") {
                     Task { await model.runCurrentCapture() }
                 }
                 .disabled(model.isWorking)
-                Button("Undo last") {
+                Button("Undo") {
                     Task { await model.undoLastReplacement() }
                 }
+                .disabled(!model.canUndo)
+
                 Spacer()
+
                 if !model.usageLabel.isEmpty {
                     Text(model.usageLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("⌘↩ replace  ·  esc close")
+                Text("⌘↩ replace  ·  esc close  ·  1–9 actions")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Close", action: close)
                     .keyboardShortcut(.cancelAction)
             }
         }
-        .padding(16)
-        .frame(minWidth: 620, minHeight: 440)
+        .padding(18)
+        .frame(minWidth: 680, minHeight: 480)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(TajpoTheme.copper.opacity(0.18), lineWidth: 1)
+        )
         .onExitCommand(perform: close)
+        .onAppear {
+            if model.preview.isEmpty && !model.originalText.isEmpty && !model.isWorking && !model.isError {
+                Task { await model.runCurrentCapture() }
+            }
+        }
     }
 
     private var displayedPreview: String {
@@ -125,19 +162,29 @@ private struct InlineRewriteView: View {
         return min(Double(model.preview.count) / Double(total), 1)
     }
 
-    private func textColumn(title: String, text: String, placeholder: String, emphasizeError: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+    private var emptyOriginal: String {
+        model.originalText.isEmpty ? "Select text in another app, then press \(model.settings.hotkeyLabel)." : ""
+    }
+
+    private var emptyPreview: String {
+        if model.isError { return model.status }
+        if model.isWorking { return "Writing…" }
+        return "Choose an action or press 1–9."
+    }
+
+    private func textColumn(title: String, text: String, placeholder: String, emphasizeError: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: title)
             ScrollView {
                 Text(text.isEmpty ? placeholder : text)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundStyle(text.isEmpty ? (emphasizeError ? Color.red : Color.secondary) : Color.primary)
+                    .font(.body)
+                    .foregroundStyle(text.isEmpty ? (emphasizeError ? TajpoTheme.terracotta : Color.secondary) : Color.primary)
                     .textSelection(.enabled)
             }
-            .padding(8)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            .padding(10)
+            .frame(maxHeight: .infinity)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 }

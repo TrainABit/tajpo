@@ -21,6 +21,7 @@ public struct TajpoScenes: Scene {
             Label("Tajpo", systemImage: model.isWorking ? "sparkles" : "character.cursor.ibeam")
                 .onAppear { model.start() }
         }
+        .menuBarExtraStyle(.window)
         Settings {
             SettingsView(model: model)
         }
@@ -31,58 +32,104 @@ struct MenuBarView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("Action", selection: $model.action) {
-                ForEach(RewriteAction.allCases) { Text($0.title).tag($0) }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tajpo")
+                        .font(.title3.weight(.semibold))
+                    Text(model.settings.provider.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                StatusPill(text: model.status, isError: model.isError, isWorking: model.isWorking)
             }
-            if model.action == .changeTone {
-                Picker("Tone", selection: $model.tone) {
-                    ForEach(RewriteTone.allCases) { Text($0.title).tag($0) }
+
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(title: "Action")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], spacing: 6) {
+                    ForEach(RewriteAction.allCases) { action in
+                        ActionChip(action: action, selected: model.action == action) {
+                            model.action = action
+                        }
+                    }
+                }
+                if model.action == .changeTone {
+                    Picker("Tone", selection: $model.tone) {
+                        ForEach(RewriteTone.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
             }
-            Button(model.isWorking ? "Working..." : "Open rewrite panel") {
-                Task { await model.rewriteSelection() }
+
+            VStack(spacing: 8) {
+                Button {
+                    Task { await model.rewriteSelection() }
+                } label: {
+                    Label(model.isWorking ? "Working…" : "Open rewrite panel", systemImage: "rectangle.and.pencil.and.ellipsis")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(TajpoTheme.copper)
+                .disabled(model.isWorking)
+                .keyboardShortcut("t", modifiers: [.command, .option])
+
+                HStack {
+                    Button("Repeat") { Task { await model.repeatLastAction() } }
+                        .disabled(model.isWorking)
+                    Button("Undo") { Task { await model.undoLastReplacement() } }
+                        .disabled(!model.canUndo)
+                }
+                .controlSize(.small)
             }
-            .disabled(model.isWorking)
-            Button("Repeat last action") {
-                Task { await model.repeatLastAction() }
-            }
-            .disabled(model.isWorking)
-            Button("Undo last replace") {
-                Task { await model.undoLastReplacement() }
-            }
-            HStack {
-                if model.isWorking { ProgressView().controlSize(.small) }
-                Text(model.status)
-                    .font(.caption)
-                    .foregroundStyle(model.isError ? Color.red : Color.secondary)
-            }
-            Text(model.isAccessibilityTrusted ? "Accessibility: granted" : "Accessibility: missing")
-                .font(.caption)
-                .foregroundStyle(model.isAccessibilityTrusted ? Color.secondary : Color.red)
+
             if !model.usageLabel.isEmpty {
                 Text(model.usageLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Divider()
+
+            HStack {
+                Label(
+                    model.isAccessibilityTrusted ? "Accessibility on" : "Accessibility needed",
+                    systemImage: model.isAccessibilityTrusted ? "checkmark.shield" : "exclamationmark.shield"
+                )
+                .font(.caption)
+                .foregroundStyle(model.isAccessibilityTrusted ? TajpoTheme.sage : TajpoTheme.terracotta)
+                Spacer()
+            }
+
             Toggle("Launch at login", isOn: launchAtLoginBinding)
+                .font(.callout)
+
             if !model.updateMessage.isEmpty {
                 Text(model.updateMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if model.updateURL != nil {
-                Button("Open latest release") { model.openUpdatePage() }
+
+            HStack {
+                if model.updateURL != nil {
+                    Button("Open latest release") { model.openUpdatePage() }
+                }
+                Button("Check updates") {
+                    Task { await model.checkForUpdates(quiet: false) }
+                }
+                Spacer()
+                SettingsLink {
+                    Text("Settings")
+                }
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q")
             }
-            Button("Check for updates") {
-                Task { await model.checkForUpdates(quiet: false) }
-            }
-            SettingsLink { Text("Settings...") }
-            Button("Quit Tajpo") { NSApplication.shared.terminate(nil) }
+            .controlSize(.small)
         }
-        .padding(12)
-        .frame(width: 320)
+        .padding(16)
+        .frame(width: 360)
+        .background(.ultraThinMaterial)
         .onAppear { model.refreshSystemState() }
     }
 

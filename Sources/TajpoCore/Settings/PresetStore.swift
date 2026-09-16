@@ -18,7 +18,7 @@ public final class PresetStore: ObservableObject {
            !value.isEmpty {
             presets = value
         } else {
-            presets = [.professional, .casual]
+            presets = [.professional, .casual, .concise, .warm]
         }
 
         if let raw = UserDefaults.standard.string(forKey: "selectedPresetID"),

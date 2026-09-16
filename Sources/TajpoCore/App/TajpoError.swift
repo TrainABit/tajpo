@@ -24,7 +24,7 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            "Add your OpenAI API key in Settings, or switch to a local server that does not need a key."
+            "Add your API key in Settings, or switch to the on-device demo / a local server."
         case .accessibilityPermissionRequired:
             "Allow Tajpo in System Settings > Privacy & Security > Accessibility, then try again."
         case .noSelection:
@@ -91,6 +91,6 @@ public enum APIKeyValidator {
 }
 
 public enum AppVersion {
-    public static let string = "1.1.0"
-    public static let build = "11"
+    public static let string = "1.2.0"
+    public static let build = "12"
 }

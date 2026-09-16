@@ -28,17 +28,29 @@ public final class AppSettings: ObservableObject {
     @Published public var githubRepository: String {
         didSet { UserDefaults.standard.set(githubRepository, forKey: "githubRepository") }
     }
+    @Published public var customInstructions: String {
+        didSet { UserDefaults.standard.set(customInstructions, forKey: "customInstructions") }
+    }
+    @Published public var historyEnabled: Bool {
+        didSet { UserDefaults.standard.set(historyEnabled, forKey: "historyEnabled") }
+    }
 
     public init() {
-        let storedProvider = LLMProvider(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .openAI
+        let storedProvider = LLMProvider(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .demo
         provider = storedProvider
         model = UserDefaults.standard.string(forKey: "model") ?? storedProvider.defaultModel
         baseURL = UserDefaults.standard.string(forKey: "baseURL") ?? storedProvider.defaultBaseURL
         apiVersion = UserDefaults.standard.string(forKey: "apiVersion") ?? ""
-        authStyle = LLMAuthStyle(rawValue: UserDefaults.standard.string(forKey: "authStyle") ?? "") ?? .bearer
+        authStyle = LLMAuthStyle(rawValue: UserDefaults.standard.string(forKey: "authStyle") ?? "") ?? (storedProvider == .openAI ? .bearer : .none)
         hotkeyKeyCode = UInt32(UserDefaults.standard.object(forKey: "hotkeyKeyCode") as? Int ?? kVK_ANSI_T)
         hotkeyModifiers = UInt32(UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? (optionKey | cmdKey))
         githubRepository = UserDefaults.standard.string(forKey: "githubRepository") ?? "TrainABit/tajpo"
+        customInstructions = UserDefaults.standard.string(forKey: "customInstructions") ?? ""
+        if UserDefaults.standard.object(forKey: "historyEnabled") == nil {
+            historyEnabled = true
+        } else {
+            historyEnabled = UserDefaults.standard.bool(forKey: "historyEnabled")
+        }
     }
 
     public var hotkeySpec: HotkeySpec {
@@ -60,9 +72,22 @@ public final class AppSettings: ObservableObject {
     public func applyProviderDefaults() {
         model = provider.defaultModel
         baseURL = provider.defaultBaseURL
-        authStyle = provider == .localCompatible ? .none : .bearer
+        authStyle = provider == .openAI ? .bearer : .none
         if provider != .openAI {
             apiVersion = ""
         }
+    }
+
+    public func effectivePreset(_ selected: WritingPreset?) -> WritingPreset? {
+        let extra = customInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !extra.isEmpty else { return selected }
+        if let selected {
+            return WritingPreset(
+                id: selected.id,
+                name: selected.name,
+                systemPrompt: selected.systemPrompt + " " + extra
+            )
+        }
+        return WritingPreset(name: "Custom", systemPrompt: extra)
     }
 }

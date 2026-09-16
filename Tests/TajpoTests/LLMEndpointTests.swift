@@ -49,4 +49,5 @@ import Testing
 @Test func localProviderDoesNotRequireKey() {
     #expect(LLMProvider.openAI.requiresAPIKey)
     #expect(!LLMProvider.localCompatible.requiresAPIKey)
+    #expect(!LLMProvider.demo.requiresAPIKey)
 }

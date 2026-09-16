@@ -41,4 +41,23 @@ import Testing
     #expect(RewriteAction.rewrite.title == "Rewrite")
     #expect(RewriteAction.shorten.title == "Shorten")
     #expect(RewriteAction.changeTone.title == "Tone")
+    #expect(RewriteAction.expand.title == "Expand")
+    #expect(RewriteAction.simplify.title == "Simplify")
+    #expect(RewriteAction.bullets.title == "Bullets")
+    #expect(RewriteAction.continueWriting.title == "Continue")
+}
+
+@Test func expandAndBulletPromptsAreSpecific() {
+    #expect(PromptBuilder.systemPrompt(action: .expand, tone: .casual, preset: nil).contains("Do not invent facts"))
+    #expect(PromptBuilder.systemPrompt(action: .bullets, tone: .casual, preset: nil).contains("bullet list"))
+}
+
+@Test func customInstructionsAreAppended() {
+    let prompt = PromptBuilder.systemPrompt(
+        action: .rewrite,
+        tone: .casual,
+        preset: nil,
+        customInstructions: "Never use the word synergy."
+    )
+    #expect(prompt.contains("Never use the word synergy."))
 }

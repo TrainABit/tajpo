@@ -21,7 +21,11 @@ struct ScriptedLLMClient: LLMClient, Sendable {
 @Test func generateReplaceAndUndoUseSelectionService() async throws {
     let selection = MockTextSelectionService(capturedText: "hello world")
     let keys = InMemoryAPIKeyStore(value: "sk-test")
+    let settings = AppSettings()
+    settings.provider = .openAI
     let model = AppModel(
+        settings: settings,
+        history: HistoryStore(defaults: UserDefaults(suiteName: "tajpo.tests.flow") ?? .standard, key: "flow", enabled: true),
         selection: selection,
         keyStore: keys,
         startAutomatically: false,
@@ -39,7 +43,10 @@ struct ScriptedLLMClient: LLMClient, Sendable {
 
 @MainActor
 @Test func missingKeyIsReportedForOpenAI() async {
+    let settings = AppSettings()
+    settings.provider = .openAI
     let model = AppModel(
+        settings: settings,
         selection: MockTextSelectionService(),
         keyStore: InMemoryAPIKeyStore(),
         startAutomatically: false,
