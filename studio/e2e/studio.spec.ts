@@ -31,7 +31,7 @@ test("onboarding, rewrite, replace, history, and settings", async ({ page }) => 
   await page.getByRole("button", { name: "Tajpo" }).click();
   await page.getByRole("button", { name: "History" }).click();
   await expect(page.getByRole("complementary", { name: "Rewrite history" })).toBeVisible();
-  await expect(page.getByRole("complementary")).toContainText("Correct");
+  await expect(page.getByRole("complementary", { name: "Rewrite history" })).toContainText("Correct");
   await page.getByRole("button", { name: "Close" }).first().click();
 
   await page.getByRole("button", { name: "Tajpo" }).click();
@@ -80,7 +80,7 @@ test("theme, connection test, custom instructions, undo, and history search", as
   await page.getByRole("menuitem", { name: "Settings…" }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await page.getByRole("button", { name: "Test connection" }).click();
-  await expect(page.getByText(/demo engine is ready/i)).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(/demo engine is ready/i);
   await page.getByRole("tab", { name: "writing" }).click();
   await page.locator("textarea").first().fill("never use the word Tajpo");
   await page.getByRole("button", { name: "Close" }).click();
@@ -109,5 +109,5 @@ test("theme, connection test, custom instructions, undo, and history search", as
   await page.getByPlaceholder("Search original, rewrite, action…").fill("zzzz-missing");
   await expect(page.getByText("No history matches that search.")).toBeVisible();
   await page.getByPlaceholder("Search original, rewrite, action…").fill("make");
-  await expect(page.getByRole("complementary")).toContainText("Correct");
+  await expect(page.getByRole("complementary", { name: "Rewrite history" })).toContainText("Correct");
 });
