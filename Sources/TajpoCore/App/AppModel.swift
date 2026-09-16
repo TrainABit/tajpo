@@ -34,17 +34,15 @@ public final class AppModel: ObservableObject {
     private var lastTone: RewriteTone?
     private var accessibilityTask: Task<Void, Never>?
 
-    public static func liveClient(endpoint: LLMEndpoint, apiKey: String) -> any LLMClient {
-        OpenAICompatibleClient(endpoint: endpoint, apiKey: apiKey)
-    }
-
     public convenience init(
         settings: AppSettings = AppSettings(),
         presets: PresetStore = PresetStore(),
         selection: TextSelectionServing = TextSelectionService(),
         keyStore: APIKeyStoring = KeychainAPIKeyStore(),
         startAutomatically: Bool = true,
-        makeClient: @escaping @Sendable (LLMEndpoint, String) -> any LLMClient = AppModel.liveClient
+        makeClient: @escaping @Sendable (LLMEndpoint, String) -> any LLMClient = { endpoint, key in
+            OpenAICompatibleClient(endpoint: endpoint, apiKey: key)
+        }
     ) {
         self.init(
             settings: settings,

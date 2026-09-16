@@ -67,7 +67,7 @@ import Testing
         selection: selection,
         keyStore: InMemoryAPIKeyStore(),
         startAutomatically: false,
-        makeClient: AppModel.liveClient
+        makeClient: { endpoint, key in OpenAICompatibleClient(endpoint: endpoint, apiKey: key) }
     )
     await model.openInlineRewrite()
     await model.runCurrentCapture()
