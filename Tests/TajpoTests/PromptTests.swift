@@ -57,7 +57,9 @@ import Testing
         action: .rewrite,
         tone: .casual,
         preset: nil,
-        customInstructions: "Never use the word synergy."
+        customInstructions: "Never use the word synergy.",
+        length: .shorter
     )
     #expect(prompt.contains("Never use the word synergy."))
+    #expect(prompt.contains("shorter than the source"))
 }

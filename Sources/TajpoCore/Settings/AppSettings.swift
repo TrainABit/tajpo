@@ -34,6 +34,9 @@ public final class AppSettings: ObservableObject {
     @Published public var historyEnabled: Bool {
         didSet { UserDefaults.standard.set(historyEnabled, forKey: "historyEnabled") }
     }
+    @Published public var rewriteLength: RewriteLength {
+        didSet { UserDefaults.standard.set(rewriteLength.rawValue, forKey: "rewriteLength") }
+    }
 
     public init() {
         let storedProvider = LLMProvider(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .demo
@@ -51,6 +54,7 @@ public final class AppSettings: ObservableObject {
         } else {
             historyEnabled = UserDefaults.standard.bool(forKey: "historyEnabled")
         }
+        rewriteLength = RewriteLength(rawValue: UserDefaults.standard.string(forKey: "rewriteLength") ?? "") ?? .same
     }
 
     public var hotkeySpec: HotkeySpec {

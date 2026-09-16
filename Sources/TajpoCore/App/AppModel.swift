@@ -8,6 +8,7 @@ public final class AppModel: ObservableObject {
     @Published public var isError = false
     @Published public var action: RewriteAction = .correct
     @Published public var tone: RewriteTone = .professional
+    @Published public var length: RewriteLength = .same
     @Published public var originalText = ""
     @Published public var preview = ""
     @Published public var usageLabel = ""
@@ -17,6 +18,7 @@ public final class AppModel: ObservableObject {
     @Published public var updateMessage = ""
     @Published public var updateURL: URL?
     @Published public var canUndo = false
+    @Published public var canRedo = false
 
     public let settings: AppSettings
     public let presets: PresetStore
@@ -27,7 +29,8 @@ public final class AppModel: ObservableObject {
     private let panel = InlinePanelController()
     private let makeClient: @Sendable (LLMEndpoint, String) -> any LLMClient
     private var currentCapture: TextCapture?
-    private var lastReplacement: (original: String, rewritten: String, capture: TextCapture)?
+    private var undoStack: [(original: String, rewritten: String, capture: TextCapture)] = []
+    private var redoStack: [(original: String, rewritten: String, capture: TextCapture)] = []
     private var generateTask: Task<Void, Never>?
     private var didStart = false
     private var lastAction: RewriteAction?
@@ -72,6 +75,7 @@ public final class AppModel: ObservableObject {
         self.makeClient = makeClient
         launchesAtLogin = LaunchAtLogin.isEnabled
         isAccessibilityTrusted = selection.isTrusted
+        length = settings.rewriteLength
         if startAutomatically {
             Task { @MainActor [weak self] in
                 self?.start()
@@ -167,8 +171,10 @@ public final class AppModel: ObservableObject {
         guard let capture = currentCapture, !preview.isEmpty else { return }
         do {
             try await selection.replace(with: preview, capture: capture)
-            lastReplacement = (original: capture.text, rewritten: preview, capture: capture)
+            undoStack.append((original: capture.text, rewritten: preview, capture: capture))
+            redoStack.removeAll()
             canUndo = true
+            canRedo = false
             recordHistory(original: capture.text, result: preview)
             showStatus("Replaced")
             panel.close()
@@ -178,15 +184,32 @@ public final class AppModel: ObservableObject {
     }
 
     public func undoLastReplacement() async {
-        guard let lastReplacement else {
+        guard let last = undoStack.popLast() else {
             show(TajpoError.nothingToUndo)
             return
         }
         do {
-            try await selection.replace(with: lastReplacement.original, capture: lastReplacement.capture)
+            try await selection.replace(with: last.original, capture: last.capture)
+            redoStack.append(last)
+            canUndo = !undoStack.isEmpty
+            canRedo = true
             showStatus("Undid last replace")
-            self.lastReplacement = nil
-            canUndo = false
+        } catch {
+            show(error)
+        }
+    }
+
+    public func redoLastReplacement() async {
+        guard let last = redoStack.popLast() else {
+            show(TajpoError.nothingToRedo)
+            return
+        }
+        do {
+            try await selection.replace(with: last.rewritten, capture: last.capture)
+            undoStack.append(last)
+            canUndo = true
+            canRedo = !redoStack.isEmpty
+            showStatus("Redid last replace")
         } catch {
             show(error)
         }
@@ -249,6 +272,9 @@ public final class AppModel: ObservableObject {
     }
 
     public func testConnection() async -> String {
+        if settings.provider == .demo {
+            return "Demo engine is ready. Nothing leaves this Mac."
+        }
         do {
             let client = try makeConfiguredClient()
             try await client.ping()
@@ -332,14 +358,19 @@ public final class AppModel: ObservableObject {
 
     private func makeConfiguredClient() throws -> any LLMClient {
         if settings.provider == .demo {
-            return DemoClient()
+            return DemoClient(length: length, customInstructions: settings.customInstructions)
         }
         let stored = APIKeyValidator.optional(try keyStore.load())
-        if settings.provider.requiresAPIKey || settings.authStyle != .none {
-            let key = try APIKeyValidator.validate(stored)
-            return makeClient(settings.endpoint, key)
+        let key = (settings.provider.requiresAPIKey || settings.authStyle != .none)
+            ? try APIKeyValidator.validate(stored)
+            : stored
+        let client = makeClient(settings.endpoint, key)
+        if var remote = client as? OpenAICompatibleClient {
+            remote.length = length
+            remote.customInstructions = settings.customInstructions
+            return remote
         }
-        return makeClient(settings.endpoint, stored)
+        return client
     }
 
     private func recordHistory(original: String, result: String) {

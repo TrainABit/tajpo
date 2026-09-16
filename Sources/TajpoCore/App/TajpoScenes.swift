@@ -54,6 +54,14 @@ struct MenuBarView: View {
                         }
                     }
                 }
+                Picker("Length", selection: $model.length) {
+                    ForEach(RewriteLength.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: model.length) { _, value in
+                    model.settings.rewriteLength = value
+                }
                 if model.action == .changeTone {
                     Picker("Tone", selection: $model.tone) {
                         ForEach(RewriteTone.allCases) { Text($0.title).tag($0) }
@@ -80,6 +88,8 @@ struct MenuBarView: View {
                         .disabled(model.isWorking)
                     Button("Undo") { Task { await model.undoLastReplacement() } }
                         .disabled(!model.canUndo)
+                    Button("Redo") { Task { await model.redoLastReplacement() } }
+                        .disabled(!model.canRedo)
                 }
                 .controlSize(.small)
             }

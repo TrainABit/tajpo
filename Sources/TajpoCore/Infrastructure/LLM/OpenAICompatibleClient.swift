@@ -4,11 +4,21 @@ public struct OpenAICompatibleClient: LLMClient {
     public var endpoint: LLMEndpoint
     public var apiKey: String
     public var session: URLSession
+    public var length: RewriteLength
+    public var customInstructions: String
 
-    public init(endpoint: LLMEndpoint, apiKey: String, session: URLSession = .shared) {
+    public init(
+        endpoint: LLMEndpoint,
+        apiKey: String,
+        session: URLSession = .shared,
+        length: RewriteLength = .same,
+        customInstructions: String = ""
+    ) {
         self.endpoint = endpoint
         self.apiKey = apiKey
         self.session = session
+        self.length = length
+        self.customInstructions = customInstructions
     }
 
     public func rewrite(
@@ -68,7 +78,7 @@ public struct OpenAICompatibleClient: LLMClient {
         request.httpBody = try JSONEncoder().encode(Request(
             model: endpoint.model,
             messages: [
-                .init(role: "system", content: PromptBuilder.systemPrompt(action: action, tone: tone, preset: preset)),
+                .init(role: "system", content: PromptBuilder.systemPrompt(action: action, tone: tone, preset: preset, customInstructions: customInstructions, length: length)),
                 .init(role: "user", content: text)
             ],
             temperature: PromptBuilder.temperature(for: action),

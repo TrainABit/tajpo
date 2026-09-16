@@ -31,6 +31,47 @@ public enum DemoLexiconLoader {
     }
 }
 
+public struct DemoRewriteExtras: Sendable, Equatable {
+    public var length: RewriteLength
+    public var preset: WritingPreset?
+    public var customInstructions: String
+
+    public init(length: RewriteLength = .same, preset: WritingPreset? = nil, customInstructions: String = "") {
+        self.length = length
+        self.preset = preset
+        self.customInstructions = customInstructions
+    }
+
+    public static let empty = DemoRewriteExtras()
+}
+
+public enum StyleRules {
+    public static func applyCustomInstructions(_ text: String, _ instructions: String) -> String {
+        var result = text
+        let patterns = [
+            #"(?:never use|don't use|do not use|avoid)(?: the word)? ["“]?([A-Za-z][A-Za-z'-]*)["”]?"#,
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+               let match = regex.firstMatch(in: instructions, range: NSRange(location: 0, length: (instructions as NSString).length)),
+               let range = Range(match.range(at: 1), in: instructions) {
+                let word = String(instructions[range])
+                let escaped = NSRegularExpression.escapedPattern(for: word)
+                if let wordRegex = try? NSRegularExpression(pattern: "\\b\(escaped)\\b", options: [.caseInsensitive]) {
+                    let ns = result as NSString
+                    result = wordRegex.stringByReplacingMatches(in: result, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+                }
+            }
+        }
+        if instructions.range(of: "no exclamation", options: .caseInsensitive) != nil {
+            result = result.replacingOccurrences(of: #"!+"#, with: ".", options: .regularExpression)
+        }
+        result = result.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
+        result = result.replacingOccurrences(of: #" +([,.;:!?])"#, with: "$1", options: .regularExpression)
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 public struct DemoRewriter: Sendable {
     public var lexicon: DemoLexicon
 
@@ -39,9 +80,13 @@ public struct DemoRewriter: Sendable {
     }
 
     public func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone) -> String {
+        rewrite(text, action: action, tone: tone, extras: .empty)
+    }
+
+    public func rewrite(_ text: String, action: RewriteAction, tone: RewriteTone, extras: DemoRewriteExtras) -> String {
         let source = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { return source }
-        let output: String = switch action {
+        var output: String = switch action {
         case .correct:
             correct(source)
         case .improve:
@@ -61,7 +106,37 @@ public struct DemoRewriter: Sendable {
         case .continueWriting:
             continueWriting(correct(source))
         }
+        output = applyPreset(output, extras.preset)
+        output = applyLength(output, extras.length)
+        output = StyleRules.applyCustomInstructions(output, extras.customInstructions)
         return action == .bullets ? tidy(output) : capitalizeSentences(tidy(output))
+    }
+
+    public func applyPreset(_ text: String, _ preset: WritingPreset?) -> String {
+        guard let preset else { return text }
+        let name = preset.name.lowercased()
+        let prompt = preset.systemPrompt.lowercased()
+        if name == "concise" || prompt.contains("short sentences") || prompt.contains("cut anything") {
+            return shorten(text)
+        }
+        if name == "professional" || prompt.contains("professional tone") {
+            return applyTone(text, .professional)
+        }
+        if name == "casual" || prompt.contains("relaxed") {
+            return applyTone(text, .casual)
+        }
+        if name == "warm" || prompt.contains("warmth") {
+            return applyTone(text, .friendly)
+        }
+        return text
+    }
+
+    public func applyLength(_ text: String, _ length: RewriteLength) -> String {
+        switch length {
+        case .shorter: shorten(text)
+        case .longer: expand(text)
+        case .same: text
+        }
     }
 
     public func correct(_ text: String) -> String {
@@ -69,6 +144,15 @@ public struct DemoRewriter: Sendable {
         result = replaceMapped(result, lexicon.casualSlang)
         result = normalizeSpaces(result)
         result = fixStandaloneI(result)
+        if let regex = try? NSRegularExpression(pattern: "\\b(brief|document|note|draft) need\\b", options: [.caseInsensitive]) {
+            let ns = result as NSString
+            let matches = regex.matches(in: result, range: NSRange(location: 0, length: ns.length))
+            for match in matches.reversed() {
+                guard let range = Range(match.range, in: result),
+                      let wordRange = Range(match.range(at: 1), in: result) else { continue }
+                result.replaceSubrange(range, with: "\(result[wordRange]) needs")
+            }
+        }
         return capitalizeSentences(result)
     }
 
@@ -292,10 +376,19 @@ private extension String {
 public struct DemoClient: LLMClient {
     public var rewriter: DemoRewriter
     public var streamDelayNanoseconds: UInt64
+    public var length: RewriteLength
+    public var customInstructions: String
 
-    public init(rewriter: DemoRewriter = DemoRewriter(), streamDelayNanoseconds: UInt64 = 8_000_000) {
+    public init(
+        rewriter: DemoRewriter = DemoRewriter(),
+        streamDelayNanoseconds: UInt64 = 8_000_000,
+        length: RewriteLength = .same,
+        customInstructions: String = ""
+    ) {
         self.rewriter = rewriter
         self.streamDelayNanoseconds = streamDelayNanoseconds
+        self.length = length
+        self.customInstructions = customInstructions
     }
 
     public func rewrite(
@@ -305,9 +398,9 @@ public struct DemoClient: LLMClient {
         preset: WritingPreset?,
         onPartial: @escaping @MainActor (String) -> Void
     ) async throws -> RewriteResult {
-        _ = preset
         try SelectionValidator.validate(text)
-        let output = rewriter.rewrite(text, action: action, tone: tone)
+        let extras = DemoRewriteExtras(length: length, preset: preset, customInstructions: customInstructions)
+        let output = rewriter.rewrite(text, action: action, tone: tone, extras: extras)
         guard !output.isEmpty else { throw TajpoError.emptyResponse }
         var partial = ""
         for character in output {

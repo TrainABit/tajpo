@@ -41,6 +41,20 @@ struct ScriptedLLMClient: LLMClient, Sendable {
     #expect(selection.replacedText == "rewritten hello world")
     await model.undoLastReplacement()
     #expect(selection.replacedText == "hello world")
+    await model.redoLastReplacement()
+    #expect(selection.replacedText == "rewritten hello world")
+}
+
+@MainActor
+@Test func redoWithoutHistoryIsExplicit() async {
+    let model = AppModel(
+        selection: MockTextSelectionService(),
+        keyStore: InMemoryAPIKeyStore(value: "sk-test"),
+        startAutomatically: false,
+        makeClient: { _, _ in ScriptedLLMClient() }
+    )
+    await model.redoLastReplacement()
+    #expect(model.status == TajpoError.nothingToRedo.errorDescription)
 }
 
 @MainActor

@@ -56,6 +56,40 @@ import Testing
     #expect(store.entries.isEmpty)
 }
 
+@Test func demoAppliesCustomInstructionsAndLength() {
+    let rewriter = DemoRewriter()
+    let result = rewriter.rewrite(
+        "Tajpo is useful!",
+        action: .correct,
+        tone: .casual,
+        extras: DemoRewriteExtras(customInstructions: "never use the word Tajpo. No exclamation marks.")
+    )
+    #expect(!result.lowercased().contains("tajpo"))
+    #expect(!result.contains("!"))
+    #expect(rewriter.rewrite("We need this.", action: .correct, tone: .casual, extras: DemoRewriteExtras(length: .longer)).contains("That is the point to keep in view."))
+}
+
+@Test func demoConcisePresetShortensWordyCopy() {
+    let rewriter = DemoRewriter()
+    let result = rewriter.rewrite(
+        "We did this due to the fact that it was necessary",
+        action: .correct,
+        tone: .professional,
+        extras: DemoRewriteExtras(preset: .concise)
+    )
+    #expect(!result.lowercased().contains("due to the fact"))
+}
+
+@Test func historyFilterMatchesQuery() {
+    let suite = "tajpo.tests.history.filter.\(UUID().uuidString)"
+    let store = HistoryStore(defaults: UserDefaults(suiteName: suite)!, key: "entries", enabled: true)
+    store.record(action: .correct, tone: .casual, original: "teh fox", result: "The fox")
+    store.record(action: .shorten, tone: .professional, original: "hello", result: "Hi")
+    #expect(store.filtered(query: "fox").count == 1)
+    #expect(store.filtered(query: "", action: "shorten").count == 1)
+    #expect(store.filtered(query: "missing").isEmpty)
+}
+
 @MainActor
 @Test func demoProviderRewritesWithoutAPIKey() async {
     let settings = AppSettings()

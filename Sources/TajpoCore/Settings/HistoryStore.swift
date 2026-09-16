@@ -79,6 +79,15 @@ public final class HistoryStore: ObservableObject {
         defaults.removeObject(forKey: key)
     }
 
+    public func filtered(query: String, action: String? = nil) -> [RewriteHistoryEntry] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return entries.filter { entry in
+            if let action, entry.action != action { return false }
+            if needle.isEmpty { return true }
+            return "\(entry.original) \(entry.result) \(entry.action) \(entry.tone)".lowercased().contains(needle)
+        }
+    }
+
     private func persist() {
         guard !isRestoring, enabled else { return }
         if let data = try? JSONEncoder().encode(entries) {

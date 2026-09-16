@@ -45,6 +45,20 @@ public enum RewriteTone: String, CaseIterable, Identifiable, Sendable {
     public var title: String { rawValue.capitalized }
 }
 
+public enum RewriteLength: String, CaseIterable, Identifiable, Sendable {
+    case shorter, same, longer
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .shorter: "Shorter"
+        case .same: "Same length"
+        case .longer: "Longer"
+        }
+    }
+}
+
 public struct WritingPreset: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
     public var name: String
@@ -200,7 +214,8 @@ public enum PromptBuilder {
         action: RewriteAction,
         tone: RewriteTone,
         preset: WritingPreset?,
-        customInstructions: String? = nil
+        customInstructions: String? = nil,
+        length: RewriteLength = .same
     ) -> String {
         let task: String = switch action {
         case .correct:
@@ -232,7 +247,12 @@ public enum PromptBuilder {
         let custom = customInstructions?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let customClause = (custom?.isEmpty == false) ? "Extra instructions from the user: \(custom!)" : nil
-        return [task, presetClause, customClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
+        let lengthClause: String? = switch length {
+        case .shorter: "Make the result shorter than the source without losing key facts."
+        case .longer: "Make the result a little longer with one clarifying sentence. Do not invent facts."
+        case .same: nil
+        }
+        return [task, presetClause, customClause, lengthClause, antiSlop, "Preserve the original language. Do not add facts. Return only the final text without quotes or commentary."]
             .compactMap { $0 }
             .joined(separator: " ")
     }

@@ -70,6 +70,15 @@ private struct InlineRewriteView: View {
                 }
             }
 
+            Picker("Length", selection: $model.length) {
+                ForEach(RewriteLength.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: model.length) { _, value in
+                model.settings.rewriteLength = value
+                Task { await model.runCurrentCapture() }
+            }
+
             if model.action == .changeTone {
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Tone", selection: $model.tone) {
@@ -122,6 +131,10 @@ private struct InlineRewriteView: View {
                     Task { await model.undoLastReplacement() }
                 }
                 .disabled(!model.canUndo)
+                Button("Redo") {
+                    Task { await model.redoLastReplacement() }
+                }
+                .disabled(!model.canRedo)
 
                 Spacer()
 

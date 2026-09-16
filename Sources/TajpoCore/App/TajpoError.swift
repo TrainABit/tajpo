@@ -10,6 +10,7 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
     case hotkeyNeedsModifier
     case nothingToRepeat
     case nothingToUndo
+    case nothingToRedo
     case rateLimited
     case emptyResponse
     case cancelled
@@ -41,6 +42,8 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
             "There is no previous action to repeat yet."
         case .nothingToUndo:
             "There is no replacement to undo yet."
+        case .nothingToRedo:
+            "There is nothing to redo yet."
         case .rateLimited:
             "The model rate limit was reached. Tajpo retried automatically; wait a moment or check billing limits."
         case .emptyResponse:

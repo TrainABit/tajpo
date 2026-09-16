@@ -9,6 +9,7 @@ public struct SettingsView: View {
     @State private var message = ""
     @State private var presetName = ""
     @State private var presetPrompt = ""
+    @State private var historyQuery = ""
     @State private var tab = SettingsTab.model
 
     public init(model: AppModel) {
@@ -59,6 +60,9 @@ public struct SettingsView: View {
                 } else {
                     Text("The on-device demo rewrites text on this Mac. No key, no network, and nothing leaves the machine.")
                         .foregroundStyle(.secondary)
+                    Button("Test connection") {
+                        Task { message = await model.testConnection() }
+                    }
                 }
                 Text(message)
                     .font(.caption)
@@ -116,10 +120,18 @@ public struct SettingsView: View {
                     presetPrompt = ""
                 }
             }
+            Section("Length") {
+                Picker("Default length", selection: $model.length) {
+                    ForEach(RewriteLength.allCases) { Text($0.title).tag($0) }
+                }
+                .onChange(of: model.length) { _, value in
+                    settings.rewriteLength = value
+                }
+            }
             Section("Always-on instructions") {
                 TextField("Optional notes for every rewrite", text: $settings.customInstructions, axis: .vertical)
                     .lineLimit(3...8)
-                Text("These stay on this Mac and are appended to the system prompt.")
+                Text("These stay on this Mac. The demo engine honors “never use the word …” and “no exclamation”. Remote models receive the full note.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -128,12 +140,21 @@ public struct SettingsView: View {
                     get: { settings.historyEnabled },
                     set: { model.setHistoryEnabled($0) }
                 ))
-                Text(history.entries.isEmpty ? "No rewrites stored yet." : "\(history.entries.count) stored on this Mac.")
+                TextField("Search history", text: $historyQuery)
+                Text(history.entries.isEmpty ? "No rewrites stored yet." : "\(history.filtered(query: historyQuery).count) of \(history.entries.count) shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let latest = history.entries.first {
-                    Button("Reopen last rewrite") {
-                        model.restoreHistory(latest)
+                ForEach(history.filtered(query: historyQuery).prefix(8)) { entry in
+                    Button {
+                        model.restoreHistory(entry)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(entry.action.capitalized)
+                            Text(entry.result)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
                     }
                 }
                 Button("Clear history", role: .destructive) {
