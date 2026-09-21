@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { defaultPresets } from "../engine";
 import { defaultSettings, shortcutLabel, useStudio } from "../state/store";
 
 const tabs = ["model", "writing", "shortcut", "appearance", "privacy"] as const;
+
+const focusableSelector =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 export function SettingsModal() {
   const { state, dispatch, actions } = useStudio();
@@ -11,10 +15,53 @@ export function SettingsModal() {
   const [presetPrompt, setPresetPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [testing, setTesting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
-  return (
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.querySelector<HTMLElement>(focusableSelector)?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatch({ type: "toggle-settings", open: false });
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (item) => item.offsetParent !== null,
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [dispatch]);
+
+  return createPortal(
     <div className="modal-backdrop" onClick={() => dispatch({ type: "toggle-settings", open: false })}>
-      <div className="modal" role="dialog" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="menu-row">
           <h2 id="settings-title" style={{ margin: 0, fontFamily: "var(--serif)" }}>
             Settings
@@ -309,6 +356,7 @@ export function SettingsModal() {
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,12 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { actionMeta, rewriteActions, rewriteTones, type RewriteLength } from "../engine";
-import { shortcutLabel, useStudio } from "../state/store";
+import { isEditableTarget, shortcutLabel, useStudio } from "../state/store";
+import { KeyCheatSheet } from "./KeyCheatSheet";
 
 export function MenuBar() {
   const { state, dispatch, actions } = useStudio();
   const [openMenu, setOpenMenu] = useState<"file" | "edit" | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const closeMenus = () => setOpenMenu(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        setShortcutsOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <header className="menubar">
@@ -28,6 +41,16 @@ export function MenuBar() {
               </button>
               <button type="button" role="menuitem" onClick={() => { dispatch({ type: "toggle-history", open: true }); closeMenus(); }}>
                 History
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setShortcutsOpen(true);
+                  closeMenus();
+                }}
+              >
+                Shortcuts…
               </button>
               <button
                 type="button"
@@ -171,6 +194,7 @@ export function MenuBar() {
           </p>
         </div>
       ) : null}
+      <KeyCheatSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </header>
   );
 }

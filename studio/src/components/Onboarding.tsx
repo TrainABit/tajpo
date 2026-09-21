@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { shortcutLabel, useStudio } from "../state/store";
 
 const titles = [
@@ -8,19 +10,58 @@ const titles = [
   "Try Tajpo",
 ];
 
+const focusableSelector =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 export function Onboarding() {
   const { state, dispatch } = useStudio();
   const step = state.onboardingStep;
   const last = step === titles.length - 1;
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.querySelector<HTMLElement>(focusableSelector)?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatch({ type: "set-onboarding", open: false });
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (item) => item.offsetParent !== null,
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const lastItem = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        lastItem.focus();
+      } else if (!event.shiftKey && (active === lastItem || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [dispatch]);
 
   const continueStep = () => {
     if (last) dispatch({ type: "set-onboarding", open: false });
     else dispatch({ type: "set-onboarding", open: true, step: step + 1 });
   };
 
-  return (
+  return createPortal(
     <div className="onboard-backdrop">
-      <div className="onboard" role="dialog" aria-labelledby="onboard-title">
+      <div ref={dialogRef} className="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
         <div className="dots" aria-hidden="true">
           {titles.map((_, index) => (
             <i key={index} className={index <= step ? "on" : ""} />
@@ -110,6 +151,7 @@ export function Onboarding() {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

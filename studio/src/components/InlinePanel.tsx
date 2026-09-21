@@ -117,6 +117,11 @@ export function InlinePanel() {
         </div>
       </div>
       <div className="actions-row">
+        {state.isWorking ? (
+          <button type="button" className="btn stop" onClick={actions.cancel}>
+            Stop
+          </button>
+        ) : null}
         <button type="button" className="btn" disabled={!state.preview || state.isWorking} onClick={actions.apply}>
           Replace
         </button>

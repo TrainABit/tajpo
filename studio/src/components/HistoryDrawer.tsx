@@ -1,8 +1,8 @@
-import { actionMeta, rewriteActions } from "../engine";
+import { actionMeta, hostDocuments, hosts, rewriteActions } from "../engine";
 import { useStudio, visibleHistory } from "../state/store";
 
 export function HistoryDrawer() {
-  const { state, dispatch } = useStudio();
+  const { state, dispatch, actions } = useStudio();
   const entries = visibleHistory(state);
 
   return (
@@ -38,25 +38,50 @@ export function HistoryDrawer() {
           ))}
         </select>
       </label>
+      <label className="stack" style={{ margin: "10px 0 14px" }}>
+        Host
+        <select
+          value={state.historyHost}
+          onChange={(event) => actions.setHistoryHost(event.target.value as typeof state.historyHost)}
+        >
+          <option value="all">All hosts</option>
+          {hosts.map((host) => (
+            <option key={host} value={host}>
+              {hostDocuments[host].title}
+            </option>
+          ))}
+        </select>
+      </label>
       {state.history.length === 0 ? (
         <div className="empty">No rewrites yet. Select text and run Tajpo to fill this list.</div>
       ) : entries.length === 0 ? (
         <div className="empty">No history matches that search.</div>
       ) : (
         entries.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            className="history-item"
-            onClick={() => dispatch({ type: "restore-history", entry })}
-          >
-            <strong>
-              {actionMeta[entry.action].title}
-              {entry.action === "changeTone" ? ` · ${entry.tone}` : ""}
-            </strong>
-            <small className="hint">{new Date(entry.createdAt).toLocaleString()}</small>
-            <p>{entry.result}</p>
-          </button>
+          <div key={entry.id} className="history-item-row">
+            <button
+              type="button"
+              className="history-item"
+              onClick={() => dispatch({ type: "restore-history", entry })}
+            >
+              <strong>
+                {actionMeta[entry.action].title}
+                {entry.action === "changeTone" ? ` · ${entry.tone}` : ""}
+                {entry.host ? ` · ${hostDocuments[entry.host]?.title ?? entry.host}` : ""}
+              </strong>
+              <small className="hint">{new Date(entry.createdAt).toLocaleString()}</small>
+              <p>{entry.result}</p>
+            </button>
+            <button
+              type="button"
+              className="history-delete"
+              aria-label="Delete entry"
+              title="Delete entry"
+              onClick={() => actions.deleteHistoryEntry(entry.id)}
+            >
+              ✕
+            </button>
+          </div>
         ))
       )}
       <button

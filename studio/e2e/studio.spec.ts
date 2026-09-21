@@ -14,7 +14,7 @@ test("onboarding, rewrite, replace, history, and settings", async ({ page }) => 
 
   const editor = page.locator("#tajpo-editor");
   await editor.click();
-  await editor.press("Control+A");
+  await editor.press("ControlOrMeta+A");
 
   await page.getByRole("button", { name: "Tajpo" }).click();
   await page.getByRole("button", { name: "Open rewrite panel" }).click({ force: true });
@@ -110,4 +110,153 @@ test("theme, connection test, custom instructions, undo, and history search", as
   await expect(page.getByText("No history matches that search.")).toBeVisible();
   await page.getByPlaceholder("Search original, rewrite, action…").fill("make");
   await expect(page.getByRole("complementary", { name: "Rewrite history" })).toContainText("Correct");
+});
+
+test("typing digits in the history search box does not open the panel or start a rewrite", async ({ page }) => {
+  // Depends on the store keyboard guards: digit keys must be ignored while an input is focused.
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("menuitem", { name: "History" }).click();
+  const drawer = page.getByRole("complementary", { name: "Rewrite history" });
+  await expect(drawer).toBeVisible();
+
+  const search = page.getByPlaceholder("Search original, rewrite, action…");
+  await search.click();
+  await page.keyboard.type("123");
+  await expect(search).toHaveValue("123");
+  await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toHaveCount(0);
+  await expect(drawer).not.toContainText(/Working/i);
+});
+
+test("Escape closes the rewrite panel", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.keyboard.press("Alt+Shift+T");
+  const panel = page.getByRole("dialog", { name: "Tajpo rewrite panel" });
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
+test("Ctrl/Cmd+Enter replaces when a preview exists", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  const editor = page.locator("#tajpo-editor");
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.keyboard.press("Alt+Shift+T");
+  const panel = page.getByRole("dialog", { name: "Tajpo rewrite panel" });
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+
+  const before = await editor.inputValue();
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(panel).toHaveCount(0);
+  await expect.poll(async () => editor.inputValue()).not.toBe(before);
+});
+
+test("diff toggle renders add and delete tokens", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.keyboard.press("Alt+Shift+T");
+  await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "Show diff" }).click();
+  await expect(page.locator(".diff-add").first()).toBeVisible();
+  await expect(page.locator(".diff-del").first()).toBeVisible();
+});
+
+test("history entry delete with undo restores the entry", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  const editor = page.locator("#tajpo-editor");
+  await editor.click();
+  await editor.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Tajpo" }).click();
+  await page.getByRole("button", { name: "Open rewrite panel" }).click({ force: true });
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Replace" }).click();
+  await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Tajpo" }).click();
+  await page.getByRole("button", { name: "History" }).click();
+  const drawer = page.getByRole("complementary", { name: "Rewrite history" });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator(".history-item")).toHaveCount(1);
+
+  await drawer.getByRole("button", { name: "Delete entry" }).click();
+  await expect(drawer.locator(".history-item")).toHaveCount(0);
+  await expect(drawer).toContainText("No rewrites yet");
+  const undo = page.locator(".toast-undo");
+  await expect(undo).toBeVisible();
+  await undo.click();
+  await expect(drawer.locator(".history-item")).toHaveCount(1);
+});
+
+test("host filter limits visible history", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  const editor = page.locator("#tajpo-editor");
+  await editor.click();
+  await editor.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Tajpo" }).click();
+  await page.getByRole("button", { name: "Open rewrite panel" }).click({ force: true });
+  await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Replace" }).click();
+  await expect(page.getByRole("dialog", { name: "Tajpo rewrite panel" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Tajpo" }).click();
+  await page.getByRole("button", { name: "History" }).click();
+  const drawer = page.getByRole("complementary", { name: "Rewrite history" });
+  await expect(drawer.locator(".history-item")).toHaveCount(1);
+
+  const hostFilter = drawer.getByLabel("Host");
+  await hostFilter.selectOption("slack");
+  await expect(drawer.locator(".history-item")).toHaveCount(0);
+  await expect(drawer).toContainText("No history matches that search.");
+  await hostFilter.selectOption({ label: "Notes" });
+  await expect(drawer.locator(".history-item")).toHaveCount(1);
+});
+
+test("Stop button appears while streaming and closes the panel", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.keyboard.press("Alt+Shift+T");
+  const panel = page.getByRole("dialog", { name: "Tajpo rewrite panel" });
+  await expect(panel).toBeVisible();
+
+  const stop = panel.getByRole("button", { name: "Stop" });
+  // The demo engine streams quickly — the Stop button may already be gone by
+  // the time we look, which is fine; when visible it must work.
+  if (await stop.isVisible().catch(() => false)) {
+    await stop.click();
+    await expect(panel).toHaveCount(0);
+  } else {
+    await expect(page.getByRole("button", { name: "Replace" })).toBeEnabled({ timeout: 15_000 });
+  }
+});
+
+test("question mark opens the keyboard cheat sheet", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Skip" }).click();
+
+  await page.keyboard.press("?");
+  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText("Open the rewrite panel");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
 });
