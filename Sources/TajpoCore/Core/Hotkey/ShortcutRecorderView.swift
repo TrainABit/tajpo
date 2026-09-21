@@ -34,6 +34,11 @@ public struct ShortcutRecorderView: View {
     private func start() {
         stop()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Escape cancels recording and keeps the previously saved shortcut.
+            if event.keyCode == UInt16(kVK_Escape) {
+                listening = false
+                return nil
+            }
             let recorded = carbonModifiers(from: event.modifierFlags)
             guard recorded != 0 else { return event }
             keyCode = UInt32(event.keyCode)

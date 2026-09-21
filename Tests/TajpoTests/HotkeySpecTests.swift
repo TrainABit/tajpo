@@ -24,3 +24,19 @@ import Testing
 @Test func modifierCombinationIsAccepted() throws {
     try HotkeySpec.validate(modifiers: HotkeySpec.carbonModifiers(command: true, option: false, control: false, shift: true))
 }
+
+@Test func shiftOnlyComboIsRejected() {
+    #expect(throws: TajpoError.hotkeyNeedsModifier) {
+        try HotkeySpec.validate(modifiers: HotkeySpec.carbonModifiers(command: false, option: false, control: false, shift: true))
+    }
+}
+
+@Test func garbageModifierBitsAreRejected() {
+    let command = HotkeySpec.carbonModifiers(command: true, option: false, control: false, shift: false)
+    #expect(throws: TajpoError.hotkeyNeedsModifier) {
+        try HotkeySpec.validate(modifiers: command | 0x8000_0000)
+    }
+    #expect(throws: TajpoError.hotkeyNeedsModifier) {
+        try HotkeySpec.validate(modifiers: UInt32(cmdKey) | UInt32(activeFlag))
+    }
+}

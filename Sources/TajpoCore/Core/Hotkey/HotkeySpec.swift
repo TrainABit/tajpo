@@ -14,8 +14,17 @@ public struct HotkeySpec: Equatable, Sendable {
         Self.modifierSymbols(modifiers) + Self.title(forKeyCode: keyCode)
     }
 
+    /// Bits accepted in a hotkey modifier mask. Anything outside these is
+    /// garbage left over from raw event flags or a corrupt preference.
+    public static let allowedModifierBits: UInt32 = UInt32(cmdKey | optionKey | controlKey | shiftKey)
+
     public static func validate(modifiers: UInt32) throws {
-        guard modifiers != 0 else { throw TajpoError.hotkeyNeedsModifier }
+        guard modifiers != 0, modifiers & ~allowedModifierBits == 0 else {
+            throw TajpoError.hotkeyNeedsModifier
+        }
+        // Shift-only shortcuts collide with regular typing (e.g. Shift+T).
+        let primary = modifiers & UInt32(cmdKey | optionKey | controlKey)
+        guard primary != 0 else { throw TajpoError.hotkeyNeedsModifier }
     }
 
     public static func title(forKeyCode code: UInt32) -> String {

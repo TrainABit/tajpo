@@ -1,6 +1,23 @@
 import Carbon
 import Foundation
 
+public enum HotkeySwapDecision: Equatable, Sendable {
+    /// The new registration succeeded: activate it and unregister any
+    /// previous registration for the same id.
+    case activateNew
+    /// The new registration failed: keep the previous registration (if any)
+    /// active and surface the failure to the caller.
+    case keepPrevious
+}
+
+/// Pure decision logic for transactional hotkey re-registration, extracted
+/// from `HotkeyCenter` (which calls Carbon directly) so it can be unit tested.
+public enum HotkeySwapPlanner {
+    public static func decision(newRegistrationSucceeded: Bool) -> HotkeySwapDecision {
+        newRegistrationSucceeded ? .activateNew : .keepPrevious
+    }
+}
+
 public final class HotkeyCenter: @unchecked Sendable {
     public static let shared = HotkeyCenter()
 
@@ -18,21 +35,30 @@ public final class HotkeyCenter: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         try installHandlerIfNeeded()
-        unregisterLocked(id: id)
+        // Transactional re-registration: register the NEW hotkey BEFORE
+        // dropping the old one, so a failed registration never leaves the
+        // user with no hotkey at all.
         let identifier = EventHotKeyID(signature: OSType(0x544A504F), id: id)
         var reference: EventHotKeyRef?
-        guard RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             spec.keyCode,
             spec.modifiers,
             identifier,
             GetApplicationEventTarget(),
             0,
             &reference
-        ) == noErr, let reference else {
+        )
+        switch HotkeySwapPlanner.decision(newRegistrationSucceeded: status == noErr && reference != nil) {
+        case .keepPrevious:
             throw TajpoError.hotkeyUnavailable
+        case .activateNew:
+            guard let reference else { throw TajpoError.hotkeyUnavailable }
+            // Idempotent: safe no-op when nothing is registered for this id,
+            // so rapid repeated configure calls cannot leak references.
+            unregisterLocked(id: id)
+            references[id] = reference
+            handlers[id] = handler
         }
-        references[id] = reference
-        handlers[id] = handler
     }
 
     public func unregister(id: UInt32) {
