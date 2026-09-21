@@ -19,7 +19,7 @@ export function systemPrompt(
     bullets:
       "Turn the text into a tight bullet list. Keep every fact. Do not add a heading unless the source already has one.",
     continueWriting:
-      "Write the next one or two sentences in the same voice. Do not repeat the source. Do not add facts that are not implied.",
+      "Return the COMPLETE text: first the user's passage verbatim, unchanged, then exactly one continuation of one or two sentences in the same voice. Never return only the continuation. Do not add facts that are not implied.",
   }[action];
 
   const presetClause = preset

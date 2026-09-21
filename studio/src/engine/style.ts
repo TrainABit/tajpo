@@ -1,13 +1,31 @@
 import type { HistoryEntry, RewriteAction } from "./types";
 
+// Only treat a match as a banned word when the instruction explicitly names a
+// word — either via "the word X" or a quoted "X". Bare phrasing such as
+// "avoid long sentences" must NOT delete the word "long" from the document.
+const bannedWordPattern =
+  /(?:never use|don't use|do not use|avoid)\s+(?:the\s+word\s+|words?\s+like\s+)["“'`]?([A-Za-z][A-Za-z'-]*)["”'`]?|(?:never use|don't use|do not use|avoid)\s+["“]([A-Za-z][A-Za-z'-]*)["”]/gi;
+
+// "replace X with Y" (optionally "the word X") — case-insensitive whole-word
+// substitution. Matched separately from the banned-word pattern so phrasing
+// like "never use the word X" is never misread as a replacement rule.
+const replaceRulePattern =
+  /replace\s+(?:the\s+word\s+)?["“'`]?([A-Za-z][A-Za-z'-]*)["”'`]?\s+with\s+["“'`]?([A-Za-z][A-Za-z'-]*)["”'`]?/gi;
+
 export function applyCustomInstructions(text: string, instructions: string): string {
   let result = text;
-  const neverWord = instructions.match(
-    /(?:never use|don't use|do not use|avoid)(?: the word)? ["“]?([A-Za-z][A-Za-z'-]*)["”]?/i,
-  );
-  if (neverWord?.[1]) {
-    const escaped = neverWord[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const match of instructions.matchAll(bannedWordPattern)) {
+    const word = match[1] ?? match[2];
+    if (!word) continue;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "").replace(/[ \t]{2,}/g, " ");
+  }
+  for (const match of instructions.matchAll(replaceRulePattern)) {
+    const from = match[1];
+    const to = match[2];
+    if (!from || !to) continue;
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), to);
   }
   if (/no exclamation/i.test(instructions)) {
     result = result.replace(/!+/g, ".");
@@ -68,8 +86,12 @@ export interface DiffToken {
 }
 
 export function wordDiff(original: string, next: string): DiffToken[] {
-  const left = original.split(/(\s+)/);
-  const right = next.split(/(\s+)/);
+  const left = original ? original.split(/(\s+)/) : [];
+  const right = next ? next.split(/(\s+)/) : [];
+  // O(1) membership lookups — linear Array.includes scans here are O(n²)
+  // and stall the UI on long documents.
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
   const tokens: DiffToken[] = [];
   let i = 0;
   let j = 0;
@@ -80,12 +102,12 @@ export function wordDiff(original: string, next: string): DiffToken[] {
       j += 1;
       continue;
     }
-    if (j < right.length && !left.includes(right[j])) {
+    if (j < right.length && !leftSet.has(right[j])) {
       tokens.push({ text: right[j], kind: "add" });
       j += 1;
       continue;
     }
-    if (i < left.length && !right.includes(left[i])) {
+    if (i < left.length && !rightSet.has(left[i])) {
       tokens.push({ text: left[i], kind: "del" });
       i += 1;
       continue;

@@ -27,6 +27,9 @@ export interface HistoryEntry {
   tone: RewriteTone;
   original: string;
   result: string;
+  /** Host app the rewrite was recorded in — optional for entries stored
+   * before host tracking existed. */
+  host?: HostId;
 }
 
 export interface WritingPreset {

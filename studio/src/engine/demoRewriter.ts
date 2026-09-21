@@ -53,24 +53,20 @@ export class DemoRewriter {
 
   applyPreset(text: string, preset?: WritingPreset | null): string {
     if (!preset) return text;
-    const name = preset.name.toLowerCase();
-    const prompt = preset.systemPrompt.toLowerCase();
-    if (name === "concise" || prompt.includes("short sentences") || prompt.includes("cut anything")) {
-      return this.shorten(text);
-    }
-    if (name === "professional" || prompt.includes("professional tone")) {
-      return this.applyTone(text, "professional");
-    }
-    if (name === "casual" || prompt.includes("relaxed")) {
-      return this.applyTone(text, "casual");
-    }
-    if (name === "warm" || prompt.includes("warmth")) {
-      return this.applyTone(text, "friendly");
-    }
+    // Match the preset by its identity only. Sniffing systemPrompt substrings can
+    // invert behavior (a preset that merely mentions a style would get the
+    // opposite transform applied deterministically).
+    const name = preset.name.trim().toLowerCase();
+    if (name === "concise") return this.shorten(text);
+    if (name === "professional") return this.applyTone(text, "professional");
+    if (name === "casual") return this.applyTone(text, "casual");
+    if (name === "warm") return this.applyTone(text, "friendly");
     return text;
   }
 
   applyLength(text: string, length: RewriteLength): string {
+    // Never expand bullet-list output — appending a prose closer to a list is nonsense.
+    if (length === "longer" && /^\s*- /m.test(text)) return text;
     if (length === "shorter") return this.shorten(text);
     if (length === "longer") return this.expand(text);
     return text;
@@ -140,6 +136,10 @@ export class DemoRewriter {
   }
 
   continueWriting(text: string): string {
+    // Unified continuation contract: the result is ALWAYS the full replacement
+    // text — the original passage first, unchanged, then exactly one
+    // continuation. The continuation is never returned alone and the source
+    // is never duplicated.
     const cleaned = text.trim();
     const last = this.splitSentences(cleaned).at(-1) ?? cleaned;
     if (last.endsWith("?")) {
@@ -187,21 +187,32 @@ export class DemoRewriter {
       .replace(/[ \t]+/g, " ")
       .replace(/ *\n+ */g, "\n")
       .replace(/ +([,.;:!?])/g, "$1")
-      .replace(/([.!?])([A-Za-z])/g, "$1 $2")
+      .replace(/([.!?])(?=[\p{L}\p{N}])/gu, (raw, mark: string, offset: number, whole: string) =>
+        // Only open up a space when the punctuation is genuinely sentence-final —
+        // never inside abbreviations ("e.g."), domains ("example.com"), or
+        // decimal/version numbers ("v1.2a").
+        isSentenceBoundary(whole, offset, mark) ? `${mark} ` : raw,
+      )
       .trim();
   }
 
   private capitalizeSentences(text: string): string {
     let capitalize = true;
     let result = "";
+    let index = 0;
     for (const character of text) {
-      if (capitalize && /[A-Za-z]/.test(character)) {
+      if (capitalize && /\p{L}/u.test(character)) {
         result += character.toUpperCase();
         capitalize = false;
       } else {
         result += character;
-        if (".!?".includes(character)) capitalize = true;
+        if (".!?".includes(character)) {
+          // Only capitalize next when this punctuation ends a sentence: it must be
+          // followed by whitespace and not be part of a number or abbreviation.
+          capitalize = isSentenceBoundary(text, index, character);
+        }
       }
+      index += character.length;
     }
     return result;
   }
@@ -216,6 +227,46 @@ export class DemoRewriter {
   private tidy(text: string): string {
     return this.normalizeSpaces(text).replace(" ,", ",").replace(" .", ".");
   }
+}
+
+// Abbreviations whose trailing period must not be treated as sentence-final.
+// Stored without the trailing dot, lowercase.
+const abbreviations = new Set([
+  "e.g",
+  "i.e",
+  "etc",
+  "vs",
+  "dr",
+  "mr",
+  "mrs",
+  "ms",
+  "u.s",
+  "u.k",
+  "st",
+  "ave",
+  "no",
+  "fig",
+  "approx",
+]);
+
+/**
+ * Returns true when the punctuation at `index` genuinely ends a sentence.
+ * Periods inside known abbreviations ("e.g."), domain-like tokens
+ * ("example.com"), and decimal/version numbers ("3.5", "v1.2a") are not
+ * sentence-final. Exclamation/question marks always are.
+ */
+function isSentenceBoundary(text: string, index: number, mark: string): boolean {
+  if (mark !== ".") return true;
+  const before = text.slice(0, index);
+  const after = text.slice(index + 1);
+  // Decimals and version numbers: digits on both sides of the dot.
+  if (/\d$/.test(before) && /^\d/.test(after)) return false;
+  // Domain-like tokens: letters around the dot with no whitespace.
+  if (/\p{L}$/u.test(before) && /^\p{L}/u.test(after)) return false;
+  // Known abbreviations ("e.g.", "Dr.", "U.S.", ...).
+  const token = before.match(/[\p{L}.\p{N}]+$/u)?.[0] ?? "";
+  if (abbreviations.has(token.replace(/\.+$/, "").toLowerCase())) return false;
+  return true;
 }
 
 function preserveCase(sample: string, replacement: string): string {
@@ -255,6 +306,9 @@ export async function streamDemo(
 export interface RewriteResultLike {
   text: string;
   usage?: { promptTokens: number; completionTokens: number };
+  /** Present when the model stopped for a reason other than a natural stop
+   *  (e.g. "length" for truncated output, "content_filter" for filtered output). */
+  finishReason?: string;
 }
 
 function sleep(ms: number): Promise<void> {
