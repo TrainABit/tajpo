@@ -37,6 +37,11 @@ public final class AppSettings: ObservableObject {
     @Published public var rewriteLength: RewriteLength {
         didSet { UserDefaults.standard.set(rewriteLength.rawValue, forKey: "rewriteLength") }
     }
+    /// The onboarding step the user last saw, so a dismissed onboarding resumes
+    /// where they left off instead of restarting.
+    @Published public var onboardingStep: Int {
+        didSet { UserDefaults.standard.set(onboardingStep, forKey: "onboardingStep") }
+    }
 
     public init() {
         let storedProvider = LLMProvider(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .demo
@@ -55,6 +60,7 @@ public final class AppSettings: ObservableObject {
             historyEnabled = UserDefaults.standard.bool(forKey: "historyEnabled")
         }
         rewriteLength = RewriteLength(rawValue: UserDefaults.standard.string(forKey: "rewriteLength") ?? "") ?? .same
+        onboardingStep = UserDefaults.standard.object(forKey: "onboardingStep") as? Int ?? 0
     }
 
     public var hotkeySpec: HotkeySpec {
@@ -80,6 +86,35 @@ public final class AppSettings: ObservableObject {
         if provider != .openAI {
             apiVersion = ""
         }
+    }
+
+    /// Restores every setting to its factory default and removes the stored
+    /// values. Used by "Erase All Data".
+    public func resetToDefaults() {
+        UserDefaults.standard.removeObject(forKey: "provider")
+        UserDefaults.standard.removeObject(forKey: "model")
+        UserDefaults.standard.removeObject(forKey: "baseURL")
+        UserDefaults.standard.removeObject(forKey: "apiVersion")
+        UserDefaults.standard.removeObject(forKey: "authStyle")
+        UserDefaults.standard.removeObject(forKey: "hotkeyKeyCode")
+        UserDefaults.standard.removeObject(forKey: "hotkeyModifiers")
+        UserDefaults.standard.removeObject(forKey: "githubRepository")
+        UserDefaults.standard.removeObject(forKey: "customInstructions")
+        UserDefaults.standard.removeObject(forKey: "historyEnabled")
+        UserDefaults.standard.removeObject(forKey: "rewriteLength")
+        UserDefaults.standard.removeObject(forKey: "onboardingStep")
+        provider = .demo
+        model = LLMProvider.demo.defaultModel
+        baseURL = LLMProvider.demo.defaultBaseURL
+        apiVersion = ""
+        authStyle = .none
+        hotkeyKeyCode = UInt32(kVK_ANSI_T)
+        hotkeyModifiers = UInt32(optionKey | cmdKey)
+        githubRepository = "TrainABit/tajpo"
+        customInstructions = ""
+        historyEnabled = true
+        rewriteLength = .same
+        onboardingStep = 0
     }
 
     public func effectivePreset(_ selected: WritingPreset?) -> WritingPreset? {

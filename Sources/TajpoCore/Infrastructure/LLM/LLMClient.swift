@@ -180,30 +180,79 @@ public struct LLMEndpoint: Equatable, Sendable {
 
     public func modelsURL() throws -> URL {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !apiVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let encodedVersion = apiVersion.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? apiVersion
+            guard let url = URL(string: "\(trimmed)/openai/models?api-version=\(encodedVersion)") else {
+                throw TajpoError.invalidEndpoint
+            }
+            return url
+        }
         guard let url = URL(string: "\(trimmed)/models") else { throw TajpoError.invalidEndpoint }
         return url
     }
+
+    /// HTTPS is required before an API key may be attached to a request.
+    /// Plain HTTP is tolerated only for loopback servers (local Ollama, llama.cpp, MLX).
+    public func validateTransportSecurity(apiKey: String) throws {
+        guard !apiKey.isEmpty, authStyle != .none else { return }
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
+            throw TajpoError.invalidEndpoint
+        }
+        guard scheme != "https" else { return }
+        let host = (url.host ?? "").lowercased()
+        guard Self.loopbackHosts.contains(host) else { throw TajpoError.insecureEndpoint }
+    }
+
+    private static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 }
 
 public struct TokenUsage: Equatable, Sendable {
-    public var promptTokens: Int
-    public var completionTokens: Int
+    /// Optional because streaming usage events may report only one side; cost labels require both.
+    public var promptTokens: Int?
+    public var completionTokens: Int?
 
-    public init(promptTokens: Int, completionTokens: Int) {
+    public init(promptTokens: Int? = nil, completionTokens: Int? = nil) {
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
     }
 
-    public var totalTokens: Int { promptTokens + completionTokens }
+    public var totalTokens: Int? {
+        guard let promptTokens, let completionTokens else { return nil }
+        return promptTokens + completionTokens
+    }
+
+    /// A cost label is only meaningful when both prompt and completion tokens are present.
+    public var isComplete: Bool { totalTokens != nil }
 }
 
 public struct RewriteResult: Equatable, Sendable {
     public var text: String
     public var usage: TokenUsage?
+    /// Set when the model stopped for a reason other than a natural stop (e.g. max_tokens).
+    public var finishReason: RewriteFinishReason?
 
-    public init(text: String, usage: TokenUsage? = nil) {
+    public init(text: String, usage: TokenUsage? = nil, finishReason: RewriteFinishReason? = nil) {
         self.text = text
         self.usage = usage
+        self.finishReason = finishReason
+    }
+}
+
+public enum RewriteFinishReason: String, Equatable, Sendable {
+    case truncated
+    case contentFiltered
+    case other
+
+    public var isNoteworthy: Bool { self != .other }
+
+    public static func parse(_ raw: String?) -> RewriteFinishReason? {
+        switch raw {
+        case "length", "max_tokens": return .truncated
+        case "content_filter": return .contentFiltered
+        case nil, "stop", "": return nil
+        default: return .other
+        }
     }
 }
 
@@ -235,7 +284,7 @@ public enum PromptBuilder {
         case .bullets:
             "Turn the text into a tight bullet list. Keep every fact. Do not add a heading unless the source already has one."
         case .continueWriting:
-            "Write the next one or two sentences in the same voice. Do not repeat the source. Do not add facts that are not implied."
+            "Return the COMPLETE text: first the user's passage verbatim, unchanged, then exactly one continuation of one or two sentences in the same voice. Never return only the continuation. Do not add facts that are not implied."
         }
         let presetClause = preset.map { preset in
             if action == .changeTone {
@@ -246,7 +295,11 @@ public enum PromptBuilder {
         }
         let custom = customInstructions?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let customClause = (custom?.isEmpty == false) ? "Extra instructions from the user: \(custom!)" : nil
+        let customClause: String? = if let custom, !custom.isEmpty {
+            "Extra instructions from the user: \(custom)"
+        } else {
+            nil
+        }
         let lengthClause: String? = switch length {
         case .shorter: "Make the result shorter than the source without losing key facts."
         case .longer: "Make the result a little longer with one clarifying sentence. Do not invent facts."
@@ -280,12 +333,17 @@ public protocol LLMClient: Sendable {
 
 public enum TokenCost {
     public static func estimateUSD(model: String, usage: TokenUsage) -> Double? {
-        guard let rates = rates[model] else { return nil }
-        return (Double(usage.promptTokens) * rates.inputPerMillion + Double(usage.completionTokens) * rates.outputPerMillion) / 1_000_000
+        guard let rates = rates[model],
+              let prompt = usage.promptTokens,
+              let completion = usage.completionTokens else { return nil }
+        return (Double(prompt) * rates.inputPerMillion + Double(completion) * rates.outputPerMillion) / 1_000_000
     }
 
+    /// Returns an empty string when the usage event is partial: a zero-filled token count
+    /// would render a misleading cost label.
     public static func label(model: String, usage: TokenUsage) -> String {
-        let tokens = "\(usage.totalTokens) tokens"
+        guard let total = usage.totalTokens else { return "" }
+        let tokens = "\(total) tokens"
         if let usd = estimateUSD(model: model, usage: usage) {
             return String(format: "%@ · about $%.4f", tokens, usd)
         }
@@ -310,8 +368,37 @@ public enum RetryPolicy {
         return min(pow(2, Double(attempt)), 8)
     }
 
+    /// Parses a Retry-After header in either of its HTTP forms:
+    /// a delay in seconds ("3") or an absolute HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT").
     public static func retryAfter(from header: String?) -> TimeInterval? {
-        guard let header, let value = TimeInterval(header) else { return nil }
-        return value
+        guard let header else { return nil }
+        let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let seconds = TimeInterval(trimmed) {
+            return seconds >= 0 ? seconds : nil
+        }
+        guard let date = httpDate(from: trimmed) else { return nil }
+        return max(0, date.timeIntervalSinceNow)
+    }
+
+    private static let httpDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter
+    }()
+
+    private static func httpDate(from string: String) -> Date? {
+        if let date = httpDateFormatter.date(from: string) { return date }
+        // RFC 850 ("Monday, 02-Jan-06 15:04:05 GMT") and asctime forms are rare but legal.
+        let alternates = ["EEEE, dd-MMM-yy HH:mm:ss 'GMT'", "EEE MMM d HH:mm:ss yyyy"]
+        for format in alternates {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "GMT")
+            formatter.dateFormat = format
+            if let date = formatter.date(from: string) { return date }
+        }
+        return nil
     }
 }

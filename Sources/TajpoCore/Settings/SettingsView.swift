@@ -10,6 +10,8 @@ public struct SettingsView: View {
     @State private var presetName = ""
     @State private var presetPrompt = ""
     @State private var historyQuery = ""
+    @State private var confirmingErase = false
+    @State private var eraseMessage = ""
     @State private var tab = SettingsTab.model
 
     public init(model: AppModel) {
@@ -85,6 +87,11 @@ public struct SettingsView: View {
                         Button("Open latest release") { model.openUpdatePage() }
                     }
                 }
+                if let lastCheck = model.lastUpdateCheck {
+                    Text("Last checked: \(lastCheck.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(8)
@@ -136,25 +143,39 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("History") {
-                Toggle("Keep a local rewrite history", isOn: Binding(
+                Toggle("Record new rewrite history", isOn: Binding(
                     get: { settings.historyEnabled },
                     set: { model.setHistoryEnabled($0) }
                 ))
+                Text("Off stops recording new entries and keeps the existing ones. Clear History is the only action that removes them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextField("Search history", text: $historyQuery)
                 Text(history.entries.isEmpty ? "No rewrites stored yet." : "\(history.filtered(query: historyQuery).count) of \(history.entries.count) shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 ForEach(history.filtered(query: historyQuery).prefix(8)) { entry in
-                    Button {
-                        model.restoreHistory(entry)
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(entry.action.capitalized)
-                            Text(entry.result)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                    HStack(alignment: .top) {
+                        Button {
+                            model.restoreHistory(entry)
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(entry.action.capitalized)
+                                Text(entry.result)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
                         }
+                        Spacer()
+                        Button {
+                            model.deleteHistory(entry.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .tint(TajpoTheme.terracotta)
+                        .help("Delete this history entry")
                     }
                 }
                 Button("Clear history", role: .destructive) {
@@ -200,6 +221,33 @@ public struct SettingsView: View {
             }
             Section("Sandbox") {
                 Text("The app is not App Sandboxed because Accessibility, a global hotkey, and clipboard fallback cannot work in the sandbox.")
+            }
+            Section("Erase everything") {
+                Text("Removes history, presets, settings, onboarding state, and every saved API key from this Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Erase All Data…", role: .destructive) {
+                    confirmingErase = true
+                }
+                .confirmationDialog(
+                    "Erase all Tajpo data on this Mac?",
+                    isPresented: $confirmingErase,
+                    titleVisibility: .visible
+                ) {
+                    Button("Erase All Data", role: .destructive) {
+                        model.eraseAllData()
+                        eraseMessage = "All local data erased."
+                        refreshKeyStatus()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("History, presets, settings, and saved API keys are removed. This cannot be undone.")
+                }
+                if !eraseMessage.isEmpty {
+                    Text(eraseMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(8)

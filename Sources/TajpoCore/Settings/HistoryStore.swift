@@ -6,6 +6,8 @@ public struct RewriteHistoryEntry: Identifiable, Codable, Hashable, Sendable {
     public var createdAt: Date
     public var action: String
     public var tone: String
+    /// Entries written before length was recorded decode with this default.
+    public var length: String
     public var original: String
     public var result: String
 
@@ -14,6 +16,7 @@ public struct RewriteHistoryEntry: Identifiable, Codable, Hashable, Sendable {
         createdAt: Date = Date(),
         action: String,
         tone: String,
+        length: String = RewriteLength.same.rawValue,
         original: String,
         result: String
     ) {
@@ -21,8 +24,35 @@ public struct RewriteHistoryEntry: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.action = action
         self.tone = tone
+        self.length = length
         self.original = original
         self.result = result
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, createdAt, action, tone, length, original, result
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        action = try container.decode(String.self, forKey: .action)
+        tone = try container.decode(String.self, forKey: .tone)
+        length = try container.decodeIfPresent(String.self, forKey: .length) ?? RewriteLength.same.rawValue
+        original = try container.decode(String.self, forKey: .original)
+        result = try container.decode(String.self, forKey: .result)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(action, forKey: .action)
+        try container.encode(tone, forKey: .tone)
+        try container.encode(length, forKey: .length)
+        try container.encode(original, forKey: .original)
+        try container.encode(result, forKey: .result)
     }
 }
 
@@ -43,8 +73,9 @@ public final class HistoryStore: ObservableObject {
         self.defaults = defaults
         self.key = key
         self.enabled = enabled
-        if enabled,
-           let data = defaults.data(forKey: key),
+        // Entries load regardless of the recording toggle: disabling recording
+        // is non-destructive, and Clear must survive a reload while disabled.
+        if let data = defaults.data(forKey: key),
            let value = try? JSONDecoder().decode([RewriteHistoryEntry].self, from: data) {
             entries = value
         } else {
@@ -55,16 +86,16 @@ public final class HistoryStore: ObservableObject {
 
     public func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
-        if !enabled {
-            clear()
-        }
+        // Non-destructive: turning recording off keeps existing entries (and
+        // their persistence) until the user explicitly clears history.
     }
 
-    public func record(action: RewriteAction, tone: RewriteTone, original: String, result: String) {
+    public func record(action: RewriteAction, tone: RewriteTone, length: RewriteLength = .same, original: String, result: String) {
         guard enabled else { return }
         let entry = RewriteHistoryEntry(
             action: action.rawValue,
             tone: tone.rawValue,
+            length: length.rawValue,
             original: original,
             result: result
         )
@@ -79,6 +110,11 @@ public final class HistoryStore: ObservableObject {
         defaults.removeObject(forKey: key)
     }
 
+    /// Removes a single entry by id and persists the change.
+    public func delete(id: UUID) {
+        entries.removeAll { $0.id == id }
+    }
+
     public func filtered(query: String, action: String? = nil) -> [RewriteHistoryEntry] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return entries.filter { entry in
@@ -89,7 +125,9 @@ public final class HistoryStore: ObservableObject {
     }
 
     private func persist() {
-        guard !isRestoring, enabled else { return }
+        // Persist regardless of the recording toggle so a Clear performed while
+        // recording is disabled is not resurrected on the next launch.
+        guard !isRestoring else { return }
         if let data = try? JSONEncoder().encode(entries) {
             defaults.set(data, forKey: key)
         }

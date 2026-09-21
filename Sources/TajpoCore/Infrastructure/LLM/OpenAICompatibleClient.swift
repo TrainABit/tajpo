@@ -6,19 +6,25 @@ public struct OpenAICompatibleClient: LLMClient {
     public var session: URLSession
     public var length: RewriteLength
     public var customInstructions: String
+    /// Streaming liveness watchdog window: if no new bytes arrive within this
+    /// many seconds, the stream is cancelled and TajpoError.streamStalled is
+    /// thrown. URLSession's own (idle) timeout stays untouched.
+    public var streamStallTimeout: TimeInterval
 
     public init(
         endpoint: LLMEndpoint,
         apiKey: String,
         session: URLSession = .shared,
         length: RewriteLength = .same,
-        customInstructions: String = ""
+        customInstructions: String = "",
+        streamStallTimeout: TimeInterval = 30
     ) {
         self.endpoint = endpoint
         self.apiKey = apiKey
         self.session = session
         self.length = length
         self.customInstructions = customInstructions
+        self.streamStallTimeout = streamStallTimeout
     }
 
     public func rewrite(
@@ -28,21 +34,23 @@ public struct OpenAICompatibleClient: LLMClient {
         preset: WritingPreset?,
         onPartial: @escaping @MainActor (String) -> Void
     ) async throws -> RewriteResult {
-        var lastError: Error = TajpoError.rateLimited
+        try SelectionValidator.validate(text)
+        var lastError: Error = TajpoError.rateLimited(retryAfter: nil)
         for attempt in 0..<RetryPolicy.maxAttempts {
             try Task.checkCancellation()
             do {
                 return try await sendRewrite(text, action: action, tone: tone, preset: preset, onPartial: onPartial)
             } catch let error as TajpoError {
                 lastError = error
-                guard case .rateLimited = error, attempt < RetryPolicy.maxAttempts - 1 else { throw error }
-                try await Task.sleep(for: .seconds(RetryPolicy.delay(forAttempt: attempt, retryAfter: nil)))
+                guard case .rateLimited(let retryAfter) = error, attempt < RetryPolicy.maxAttempts - 1 else { throw error }
+                try await Task.sleep(for: .seconds(RetryPolicy.delay(forAttempt: attempt, retryAfter: retryAfter)))
             }
         }
         throw lastError
     }
 
     public func ping() async throws {
+        try endpoint.validateTransportSecurity(apiKey: apiKey)
         var request = URLRequest(url: try endpoint.modelsURL())
         request.httpMethod = "GET"
         request.timeoutInterval = 12
@@ -50,7 +58,9 @@ public struct OpenAICompatibleClient: LLMClient {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw TajpoError.network("Invalid response.") }
-            if http.statusCode == 429 { throw TajpoError.rateLimited }
+            if http.statusCode == 429 {
+                throw TajpoError.rateLimited(retryAfter: RetryPolicy.retryAfter(from: http.value(forHTTPHeaderField: "Retry-After")))
+            }
             guard (200..<300).contains(http.statusCode) else {
                 throw TajpoError.api("HTTP \(http.statusCode)")
             }
@@ -70,6 +80,7 @@ public struct OpenAICompatibleClient: LLMClient {
         preset: WritingPreset?,
         onPartial: @escaping @MainActor (String) -> Void
     ) async throws -> RewriteResult {
+        try endpoint.validateTransportSecurity(apiKey: apiKey)
         var request = URLRequest(url: try endpoint.chatCompletionsURL())
         request.httpMethod = "POST"
         request.timeoutInterval = 90
@@ -89,36 +100,69 @@ public struct OpenAICompatibleClient: LLMClient {
         do {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else { throw TajpoError.network("Invalid response.") }
-            if http.statusCode == 429 { throw TajpoError.rateLimited }
+            if http.statusCode == 429 {
+                throw TajpoError.rateLimited(retryAfter: RetryPolicy.retryAfter(from: http.value(forHTTPHeaderField: "Retry-After")))
+            }
             guard (200..<300).contains(http.statusCode) else {
                 throw TajpoError.api(try await OpenAIErrorParser.message(from: bytes, status: http.statusCode))
             }
 
-            var result = ""
-            var usage: TokenUsage?
-            for try await line in bytes.lines {
-                try Task.checkCancellation()
-                guard line.hasPrefix("data: ") else { continue }
-                let payload = String(line.dropFirst(6))
-                if payload == "[DONE]" { break }
-                guard let data = payload.data(using: .utf8),
-                      let event = try? JSONDecoder().decode(StreamEvent.self, from: data) else { continue }
-                if let message = event.error?.message, !message.isEmpty {
-                    throw TajpoError.api(message)
+            let accumulator = StreamAccumulator()
+            let stallTimeout = streamStallTimeout
+            // Race the read loop against a liveness watchdog. If no new bytes
+            // arrive within the window, the watchdog throws streamStalled and
+            // the group cancels the stalled read.
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        accumulator.noteActivity()
+                        guard line.hasPrefix("data: ") else { continue }
+                        let payload = String(line.dropFirst(6))
+                        if payload == "[DONE]" { break }
+                        guard let data = payload.data(using: .utf8),
+                              let event = try? JSONDecoder().decode(StreamEvent.self, from: data) else { continue }
+                        if let message = event.error?.message, !message.isEmpty {
+                            throw TajpoError.api(message)
+                        }
+                        if let eventUsage = event.usage {
+                            accumulator.setUsage(TokenUsage(
+                                promptTokens: eventUsage.promptTokens,
+                                completionTokens: eventUsage.completionTokens
+                            ))
+                        }
+                        if let parsed = RewriteFinishReason.parse(event.choices.first?.finishReason) {
+                            accumulator.setFinishReason(parsed)
+                        }
+                        guard let delta = event.choices.first?.delta.content else { continue }
+                        let combined = accumulator.append(delta)
+                        await onPartial(combined)
+                    }
                 }
-                if let eventUsage = event.usage {
-                    usage = TokenUsage(
-                        promptTokens: eventUsage.promptTokens ?? 0,
-                        completionTokens: eventUsage.completionTokens ?? 0
-                    )
+                group.addTask {
+                    while true {
+                        // A cancelled watchdog must exit quietly: the read loop
+                        // already produced its result.
+                        do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                        if accumulator.isStale(after: stallTimeout) {
+                            throw TajpoError.streamStalled
+                        }
+                    }
                 }
-                guard let delta = event.choices.first?.delta.content else { continue }
-                result += delta
-                await onPartial(result)
+                do {
+                    try await group.next()
+                } catch {
+                    group.cancelAll()
+                    throw error
+                }
+                group.cancelAll()
             }
-            let final = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !final.isEmpty else { throw TajpoError.emptyResponse }
-            return RewriteResult(text: final, usage: usage)
+            let snapshot = accumulator.snapshot()
+            let final = snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if final.isEmpty {
+                throw snapshot.finishReason == .contentFiltered ? TajpoError.emptyContentFiltered : TajpoError.emptyResponse
+            }
+            return RewriteResult(text: final, usage: snapshot.usage, finishReason: snapshot.finishReason)
         } catch is CancellationError {
             throw TajpoError.cancelled
         } catch let error as TajpoError {
@@ -139,6 +183,48 @@ public struct OpenAICompatibleClient: LLMClient {
         case .none, .bearer, .apiKeyHeader:
             break
         }
+    }
+}
+
+/// Lock-protected accumulator shared between the streaming read task and the
+/// liveness watchdog task.
+private final class StreamAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = ""
+    private var usage: TokenUsage?
+    private var finishReason: RewriteFinishReason?
+    private var lastActivity = Date()
+
+    func noteActivity() {
+        lock.lock(); defer { lock.unlock() }
+        lastActivity = Date()
+    }
+
+    func append(_ delta: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        text += delta
+        lastActivity = Date()
+        return text
+    }
+
+    func setUsage(_ value: TokenUsage) {
+        lock.lock(); defer { lock.unlock() }
+        usage = value
+    }
+
+    func setFinishReason(_ value: RewriteFinishReason) {
+        lock.lock(); defer { lock.unlock() }
+        finishReason = value
+    }
+
+    func isStale(after timeout: TimeInterval) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return Date().timeIntervalSince(lastActivity) > timeout
+    }
+
+    func snapshot() -> (text: String, usage: TokenUsage?, finishReason: RewriteFinishReason?) {
+        lock.lock(); defer { lock.unlock() }
+        return (text, usage, finishReason)
     }
 }
 
@@ -203,6 +289,12 @@ private struct StreamEvent: Decodable {
 
     struct Choice: Decodable {
         let delta: Delta
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
     }
 
     struct Delta: Decodable {

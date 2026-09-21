@@ -8,12 +8,38 @@ public protocol APIKeyStoring: Sendable {
 }
 
 public struct KeychainAPIKeyStore: APIKeyStoring {
+    /// Keys written before per-provider scoping used this shared account.
+    public static let legacyAccount = "openai-api-key"
+
     private let service: String
     private let account: String
 
-    public init(service: String = "com.tajpo.app", account: String = "openai-api-key") {
+    public init(service: String = "com.tajpo.app", account: String = KeychainAPIKeyStore.legacyAccount) {
         self.service = service
         self.account = account
+    }
+
+    /// Scopes the Keychain account to a provider so keys for different providers
+    /// do not overwrite each other.
+    public init(service: String = "com.tajpo.app", provider: LLMProvider) {
+        self.init(service: service, account: Self.accountName(for: provider))
+    }
+
+    public static func accountName(for provider: LLMProvider) -> String {
+        "api-key-\(provider.rawValue)"
+    }
+
+    /// Loads the scoped key, falling back to the legacy shared account.
+    /// The legacy item is migrated into the scoped account and removed so each
+    /// provider owns a distinct item afterwards.
+    public func loadMigratingLegacy() throws -> String? {
+        if let scoped = try load() { return scoped }
+        guard account != Self.legacyAccount else { return nil }
+        let legacy = KeychainAPIKeyStore(service: service, account: Self.legacyAccount)
+        guard let value = try legacy.load(), !value.isEmpty else { return nil }
+        try save(value)
+        try? legacy.delete()
+        return value
     }
 
     public func load() throws -> String? {

@@ -8,6 +8,29 @@ import Testing
     #expect(rewriter.rewrite("i can do this", action: .correct, tone: .casual) == "I can do this")
 }
 
+@Test func demoPreservesAbbreviationsDomainsAndVersionNumbers() {
+    let rewriter = DemoRewriter()
+    // The spacing normalizer must not split these at their periods...
+    #expect(rewriter.rewrite("use e.g. this tool", action: .correct, tone: .casual) == "Use e.g. this tool")
+    #expect(rewriter.rewrite("check example.com today", action: .correct, tone: .casual) == "Check example.com today")
+    #expect(rewriter.rewrite("v1.2a is out", action: .correct, tone: .casual) == "V1.2a is out")
+    // ...and the capitalizer must not treat their periods as sentence-final.
+    #expect(rewriter.rewrite("version 3.5 is ready", action: .correct, tone: .casual) == "Version 3.5 is ready")
+    #expect(rewriter.rewrite("dr. smith called", action: .correct, tone: .casual) == "Dr. Smith called")
+    #expect(rewriter.rewrite("the u.s. team won", action: .correct, tone: .casual) == "The U.S. team won")
+}
+
+@Test func demoStillSplitsRunTogetherSentences() {
+    let rewriter = DemoRewriter()
+    #expect(rewriter.rewrite("hello world.this is second", action: .correct, tone: .casual) == "Hello world. This is second")
+    #expect(rewriter.rewrite("wow!that is fast", action: .correct, tone: .casual) == "Wow! That is fast")
+}
+
+@Test func demoCapitalizesUnicodeSentenceStarts() {
+    let rewriter = DemoRewriter()
+    #expect(rewriter.rewrite("élève arrives. elle parle", action: .correct, tone: .casual) == "Élève arrives. Elle parle")
+}
+
 @Test func demoConfidentToneStripsHedgesAndFiller() {
     let rewriter = DemoRewriter()
     #expect(rewriter.rewrite("i think we should really just go", action: .changeTone, tone: .confident) == "We should go")

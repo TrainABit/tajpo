@@ -51,6 +51,14 @@ public final class PresetStore: ObservableObject {
         }
     }
 
+    /// Restores the factory presets. Used by "Erase All Data".
+    public func resetToDefaults() {
+        UserDefaults.standard.removeObject(forKey: "writingPresets")
+        UserDefaults.standard.removeObject(forKey: "selectedPresetID")
+        presets = [.professional, .casual, .concise, .warm]
+        selectedID = presets.first?.id
+    }
+
     private func persistPresets() {
         guard !isRestoring, let data = try? JSONEncoder().encode(presets) else { return }
         UserDefaults.standard.set(data, forKey: "writingPresets")
