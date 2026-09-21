@@ -23,8 +23,30 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 echo "Building Tajpo..."
 swift build -c release --package-path "$ROOT"
 BIN="$(swift build -c release --package-path "$ROOT" --show-bin-path)/Tajpo"
+BIN_DIR="$(dirname "$BIN")"
 cp "$BIN" "$APP/Contents/MacOS/Tajpo"
 cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
+
+# Ship the SwiftPM resource bundle. The accessor this toolchain generates
+# resolves `Bundle.main.bundleURL/Tajpo_TajpoCore.bundle`, i.e. the .app ROOT —
+# not Contents/Resources. Copying it anywhere else would make
+# DemoLexiconLoader fatalError on the first run of a packaged build.
+RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+if [[ -n "$RESOURCE_BUNDLE" ]]; then
+  rm -rf "$APP/Tajpo_TajpoCore.bundle" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
+  cp -R "$RESOURCE_BUNDLE" "$APP/Tajpo_TajpoCore.bundle"
+  # Also keep a copy under Contents/Resources for tools that expect resources there.
+  cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
+  if [[ ! -d "$APP/Tajpo_TajpoCore.bundle" ]]; then
+    echo "error: failed to place Tajpo_TajpoCore.bundle at the app root." >&2
+    exit 1
+  fi
+  echo "Bundled resources: $(basename "$RESOURCE_BUNDLE") (app root + Contents/Resources)"
+else
+  echo "error: Tajpo_TajpoCore.bundle was not produced by 'swift build -c release' in $BIN_DIR." >&2
+  echo "error: the packaged app would fail to load its on-device demo lexicon. Aborting." >&2
+  exit 1
+fi
 
 if [[ -f "$ICON_SOURCE" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
   ICONSET="$DIST/AppIcon.iconset"
@@ -53,13 +75,19 @@ fi
 
 if [[ -n "${APPLE_ID:-}" && -n "${TEAM_ID:-}" && -n "${APP_PASSWORD:-}" ]]; then
   echo "Notarizing..."
-  ditto -c -k --keepParent "$APP" "$DIST/Tajpo.zip"
-  xcrun notarytool submit "$DIST/Tajpo.zip" \
+  # Zip and submit a staging copy; the distributable ZIP is rebuilt after the
+  # staple so it contains the final stapled bundle.
+  ditto -c -k --keepParent "$APP" "$DIST/Tajpo-notarize.zip"
+  xcrun notarytool submit "$DIST/Tajpo-notarize.zip" \
     --apple-id "$APPLE_ID" \
     --team-id "$TEAM_ID" \
     --password "$APP_PASSWORD" \
     --wait
   xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+  rm -f "$DIST/Tajpo-notarize.zip" "$DIST/Tajpo.zip"
+  ditto -c -k --keepParent "$APP" "$DIST/Tajpo.zip"
+  echo "Distributable ZIP rebuilt after stapling: $DIST/Tajpo.zip"
 fi
 
 echo "App: $APP"
