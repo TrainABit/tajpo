@@ -12,7 +12,9 @@ import {
 import {
   applyReplacement,
   defaultPresets,
+  estimateTokenCount,
   filterHistory,
+  finishReasonLabel,
   hostDocuments,
   redoReplacement,
   streamDemo,
@@ -80,6 +82,9 @@ export interface StudioState {
   history: HistoryEntry[];
   historyQuery: string;
   historyAction: RewriteAction | "all";
+  historyHost: "all" | HostId;
+  lastDeletedHistory: HistoryEntry | null;
+  lastDeletedHistoryIndex: number;
   undoStack: Replacement[];
   redoStack: Replacement[];
   toast: Toast | null;
@@ -114,6 +119,9 @@ type Action =
   | { type: "restore-history"; entry: HistoryEntry }
   | { type: "history-query"; query: string }
   | { type: "history-action"; action: RewriteAction | "all" }
+  | { type: "history-host"; host: "all" | HostId }
+  | { type: "delete-history-entry"; id: string }
+  | { type: "undo-delete-history" }
   | { type: "update-settings"; settings: Partial<StudioSettings> }
   | { type: "set-presets"; presets: WritingPreset[]; selectedPresetId?: string }
   | { type: "toast"; toast: Toast | null }
@@ -121,6 +129,14 @@ type Action =
   | { type: "idle" };
 
 const storageKey = "tajpo.studio.v2";
+const legacyStorageKey = "tajpo.studio.v1";
+const onboardedKey = "tajpo.studio.onboarded";
+const storageVersion = 2;
+const undoLimit = 50;
+const historyLimit = 40;
+const historyByteBudget = 1024 * 1024; // 1 MiB of UTF-8 across the history list
+const stackByteBudget = 256 * 1024; // 256 KiB of UTF-8 per undo/redo stack
+const persistThrottleMs = 750; // max write frequency while a stream is running
 
 const defaultSettings: StudioSettings = {
   provider: "demo",
@@ -142,6 +158,53 @@ function emptyDocuments(): Record<HostId, string> {
     slack: hostDocuments.slack.body,
     docs: hostDocuments.docs.body,
   };
+}
+
+const utf8 = new TextEncoder();
+
+function utf8Bytes(value: unknown): number {
+  return utf8.encode(JSON.stringify(value)).length;
+}
+
+/** Enforce the history byte budget. The list is newest-first, so entries past
+ * the budget are the oldest ones and get evicted. A single entry larger than
+ * the whole budget is skipped rather than truncated; the caller surfaces that
+ * with a toast via `skippedOversized`. */
+export function budgetHistory(history: HistoryEntry[]): { history: HistoryEntry[]; skippedOversized: boolean } {
+  const kept: HistoryEntry[] = [];
+  let total = 0;
+  let skippedOversized = false;
+  for (const entry of history) {
+    const bytes = utf8Bytes(entry);
+    if (bytes > historyByteBudget) {
+      skippedOversized = true;
+      continue;
+    }
+    if (kept.length >= historyLimit || total + bytes > historyByteBudget) break;
+    total += bytes;
+    kept.push(entry);
+  }
+  return { history: kept, skippedOversized };
+}
+
+/** Enforce the undo/redo byte budget. The stack is oldest-first, so the
+ * oldest entries are evicted while the newest ones are always kept. Count is
+ * capped separately by the `undoLimit` slices at the call sites. */
+export function budgetStack(stack: Replacement[]): Replacement[] {
+  let total = 0;
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    total += utf8Bytes(stack[i]);
+    if (total > stackByteBudget) return stack.slice(i + 1);
+  }
+  return stack;
+}
+
+/** Whether a persistence write should happen now: during an active stream,
+ * partial tokens arrive far faster than storage should be hit, so writes are
+ * throttled; the moment the stream ends (or the panel closes) the write is
+ * flushed immediately. */
+export function shouldWritePersist(isWorking: boolean, lastWriteAt: number, now: number): boolean {
+  return !isWorking || now - lastWriteAt >= persistThrottleMs;
 }
 
 export function createInitialState(): StudioState {
@@ -171,6 +234,9 @@ export function createInitialState(): StudioState {
     history: [],
     historyQuery: "",
     historyAction: "all",
+    historyHost: "all",
+    lastDeletedHistory: null,
+    lastDeletedHistoryIndex: -1,
     undoStack: [],
     redoStack: [],
     toast: null,
@@ -188,6 +254,8 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
         menuOpen: false,
         panelOpen: false,
         toast: null,
+        lastDeletedHistory: null,
+        lastDeletedHistoryIndex: -1,
         documents: { ...emptyDocuments(), ...action.state.documents },
       };
     case "set-host":
@@ -253,11 +321,26 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
       return { ...state, status: action.status, isError: action.isError ?? false };
     case "apply": {
       const body = state.documents[state.host];
-      const applied = applyReplacement(body, action.start, action.end, action.rewritten);
+      let { start, end } = action;
+      if (body.slice(start, end) !== state.original) {
+        // The document changed since the panel opened; re-locate the original passage.
+        const found = body.indexOf(state.original);
+        if (found < 0) {
+          return {
+            ...state,
+            isError: true,
+            status: "Selection changed — re-select and retry",
+            toast: { message: "Selection changed — re-select and retry", kind: "error" },
+          };
+        }
+        start = found;
+        end = found + state.original.length;
+      }
+      const applied = applyReplacement(body, start, end, action.rewritten);
       return {
         ...state,
         documents: { ...state.documents, [state.host]: applied.next },
-        undoStack: [...state.undoStack, { ...applied.entry, host: state.host }],
+        undoStack: [...state.undoStack, { ...applied.entry, host: state.host }].slice(-undoLimit),
         redoStack: [],
         selection: { start: applied.entry.start, end: applied.entry.end },
         panelOpen: false,
@@ -278,7 +361,7 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
         ...state,
         documents: { ...state.documents, [last.host]: next },
         undoStack: state.undoStack.slice(0, -1),
-        redoStack: [...state.redoStack, last],
+        redoStack: [...state.redoStack, last].slice(-undoLimit),
         host: last.host as HostId,
         selection: { start: last.start, end: last.start + last.original.length },
         status: "Undid last replace",
@@ -297,7 +380,7 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
         ...state,
         documents: { ...state.documents, [last.host]: next },
         redoStack: state.redoStack.slice(0, -1),
-        undoStack: [...state.undoStack, last],
+        undoStack: [...state.undoStack, last].slice(-undoLimit),
         host: last.host as HostId,
         selection: { start: last.start, end: last.end },
         status: "Redid last replace",
@@ -305,13 +388,28 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
         toast: { message: "Redid last replace", kind: "ok" },
       };
     }
-    case "record-history":
-      return { ...state, history: [action.entry, ...state.history].slice(0, 40) };
+    case "record-history": {
+      const latest = state.history[0];
+      if (latest && latest.action === action.entry.action && latest.original === action.entry.original && latest.result === action.entry.result) {
+        return state;
+      }
+      // Count and byte budgets are enforced together; an entry too large for
+      // the whole budget is skipped with feedback rather than truncated.
+      const { history, skippedOversized } = budgetHistory([action.entry, ...state.history]);
+      return {
+        ...state,
+        history,
+        ...(skippedOversized
+          ? { toast: { message: "An oversized history entry was skipped", kind: "error" as const } }
+          : {}),
+      };
+    }
     case "clear-history":
       return { ...state, history: [], toast: { message: "History cleared", kind: "ok" } };
-    case "restore-history": {
-      const body = state.documents[state.host];
-      const found = body.indexOf(action.entry.original);
+    case "restore-history":
+      // Preview-only restore. No document search and no implicit edit target:
+      // the selection is cleared so Replace stays disarmed until the user
+      // selects live text through the normal workflow.
       return {
         ...state,
         original: action.entry.original,
@@ -320,16 +418,45 @@ export function reduceStudio(state: StudioState, action: Action): StudioState {
         tone: action.entry.tone,
         panelOpen: true,
         historyOpen: false,
-        selection: found >= 0 ? { start: found, end: found + action.entry.original.length } : state.selection,
-        status: "Restored from history",
+        selection: null,
+        status: "Restored from history — select the passage live to replace it",
         isError: false,
         toast: { message: "Restored a previous rewrite", kind: "ok" },
       };
-    }
     case "history-query":
       return { ...state, historyQuery: action.query };
     case "history-action":
       return { ...state, historyAction: action.action };
+    case "history-host":
+      return state.historyHost === action.host ? state : { ...state, historyHost: action.host };
+    case "delete-history-entry": {
+      const index = state.history.findIndex((entry) => entry.id === action.id);
+      if (index < 0) return state;
+      const history = state.history.slice();
+      const [removed] = history.splice(index, 1);
+      return {
+        ...state,
+        history,
+        lastDeletedHistory: removed,
+        lastDeletedHistoryIndex: index,
+        toast: { message: "Entry deleted", kind: "ok" },
+      };
+    }
+    case "undo-delete-history": {
+      if (!state.lastDeletedHistory) {
+        return { ...state, toast: { message: "Nothing to undo", kind: "error" } };
+      }
+      const history = state.history.slice();
+      const index = state.lastDeletedHistoryIndex >= 0 ? Math.min(state.lastDeletedHistoryIndex, history.length) : history.length;
+      history.splice(index, 0, state.lastDeletedHistory);
+      return {
+        ...state,
+        history,
+        lastDeletedHistory: null,
+        lastDeletedHistoryIndex: -1,
+        toast: { message: "Entry restored", kind: "ok" },
+      };
+    }
     case "update-settings": {
       const settings = { ...state.settings, ...action.settings };
       const shortcut = settings.shortcut;
@@ -357,8 +484,53 @@ const StudioContext = createContext<{
   actions: ReturnType<typeof bindActions>;
 } | null>(null);
 
+export function isEditableTarget(target: unknown): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (target.closest("[contenteditable='true']")) return true;
+  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isHistoryEntry(value: unknown): value is HistoryEntry {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.action === "string" &&
+    typeof value.tone === "string" &&
+    typeof value.original === "string" &&
+    typeof value.result === "string"
+  );
+}
+
+function validHistoryEntries(value: unknown): HistoryEntry[] {
+  return Array.isArray(value) ? value.filter(isHistoryEntry).slice(0, 40) : [];
+}
+
+export function sanitizeStoredState(parsed: unknown): Partial<StudioState> {
+  if (!isRecord(parsed)) return {};
+  const safe: Partial<StudioState> = { ...parsed } as Partial<StudioState>;
+  const storedSettings = isRecord(parsed.settings) ? (parsed.settings as Partial<StudioSettings>) : {};
+  const storedShortcut = isRecord(storedSettings.shortcut) ? storedSettings.shortcut : {};
+  safe.settings = {
+    ...defaultSettings,
+    ...storedSettings,
+    shortcut: { ...defaultSettings.shortcut, ...storedShortcut },
+  };
+  safe.history = budgetHistory(validHistoryEntries(parsed.history)).history;
+  safe.historyHost = parsed.historyHost === "notes" || parsed.historyHost === "mail" || parsed.historyHost === "slack" || parsed.historyHost === "docs" ? parsed.historyHost : "all";
+  if (Array.isArray(parsed.undoStack)) safe.undoStack = (parsed.undoStack as Replacement[]).slice(-undoLimit);
+  if (Array.isArray(parsed.redoStack)) safe.redoStack = (parsed.redoStack as Replacement[]).slice(-undoLimit);
+  return safe;
+}
+
 function persistable(state: StudioState) {
   return {
+    version: storageVersion,
     host: state.host,
     documents: state.documents,
     action: state.action,
@@ -368,18 +540,32 @@ function persistable(state: StudioState) {
     settings: state.settings,
     presets: state.presets,
     selectedPresetId: state.selectedPresetId,
-    history: state.settings.historyEnabled ? state.history : [],
-    undoStack: state.undoStack,
-    redoStack: state.redoStack,
+    // History is persisted even while recording is disabled: turning recording
+    // off stops new entries, it does not drop existing ones.
+    history: budgetHistory(state.history).history,
+    historyHost: state.historyHost,
+    undoStack: budgetStack(state.undoStack.slice(-undoLimit)),
+    redoStack: budgetStack(state.redoStack.slice(-undoLimit)),
     onboardingOpen: state.onboardingOpen,
     onboardingStep: state.onboardingStep,
   };
 }
 
-function bindActions(
+export function degradedPersistable(state: StudioState, dropStacks: boolean) {
+  const snapshot = persistable(state);
+  return {
+    ...snapshot,
+    history: [],
+    undoStack: dropStacks ? [] : snapshot.undoStack,
+    redoStack: dropStacks ? [] : snapshot.redoStack,
+  };
+}
+
+export function bindActions(
   state: StudioState,
   dispatch: Dispatch<Action>,
   abortRef: { current: AbortController | null },
+  generationRef: { current: number } = { current: 0 },
 ) {
   const selectedText = () => {
     const body = state.documents[state.host];
@@ -414,6 +600,8 @@ function bindActions(
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const generation = (generationRef.current += 1);
+    const isStale = () => generationRef.current !== generation || controller.signal.aborted;
     dispatch({ type: "set-action", action: nextAction });
     dispatch({ type: "set-tone", tone: nextTone });
     dispatch({ type: "set-length", length: nextLength });
@@ -425,7 +613,10 @@ function bindActions(
       }
       const preset = state.presets.find((item) => item.id === state.selectedPresetId) ?? null;
       const extras = { length: nextLength, preset, customInstructions: state.settings.customInstructions };
-      const onPartial = (preview: string) => dispatch({ type: "partial", preview });
+      const onPartial = (preview: string) => {
+        if (isStale()) return;
+        dispatch({ type: "partial", preview });
+      };
       const result =
         state.settings.provider === "demo"
           ? await streamDemo(text, nextAction, nextTone, onPartial, controller.signal, 8, extras)
@@ -448,11 +639,17 @@ function bindActions(
               onPartial,
               controller.signal,
             );
+      if (isStale()) return;
       const usageLabel = result.usage
         ? tokenCostLabel(state.settings.model, result.usage.promptTokens, result.usage.completionTokens)
-        : "";
+        : `≈ ${estimateTokenCount(state.original) + estimateTokenCount(result.text)} tokens (estimated) — cost unavailable`;
       dispatch({ type: "ready", preview: result.text, usageLabel });
+      const warning = finishReasonLabel(result.finishReason);
+      if (warning) {
+        dispatch({ type: "toast", toast: { message: warning, kind: "error" } });
+      }
     } catch (error) {
+      if (isStale()) return;
       if (error instanceof DOMException && error.name === "AbortError") {
         dispatch({ type: "status", status: "Cancelled" });
         dispatch({ type: "idle" });
@@ -478,6 +675,7 @@ function bindActions(
           tone: state.tone,
           original: state.original,
           result: state.preview,
+          host: state.host,
         },
       });
     }
@@ -485,7 +683,13 @@ function bindActions(
 
   const copyPreview = async () => {
     if (!state.preview) return;
-    await navigator.clipboard.writeText(state.preview);
+    try {
+      await navigator.clipboard.writeText(state.preview);
+    } catch {
+      dispatch({ type: "status", status: "Copy failed", isError: true });
+      dispatch({ type: "toast", toast: { message: "Could not copy to the clipboard", kind: "error" } });
+      return;
+    }
     dispatch({ type: "status", status: "Copied" });
     dispatch({ type: "toast", toast: { message: "Copied rewrite", kind: "ok" } });
     if (state.settings.historyEnabled) {
@@ -498,6 +702,7 @@ function bindActions(
           tone: state.tone,
           original: state.original,
           result: state.preview,
+          host: state.host,
         },
       });
     }
@@ -505,6 +710,7 @@ function bindActions(
 
   const cancel = () => {
     abortRef.current?.abort();
+    generationRef.current += 1;
     dispatch({ type: "idle" });
     dispatch({ type: "close-panel" });
   };
@@ -515,25 +721,44 @@ function bindActions(
     return result.message;
   };
 
-  return { openPanel, generate, apply, copyPreview, cancel, ping, selectedText };
+  const deleteHistoryEntry = (id: string) => {
+    dispatch({ type: "delete-history-entry", id });
+  };
+
+  const undoDeleteHistory = () => {
+    dispatch({ type: "undo-delete-history" });
+  };
+
+  const setHistoryHost = (host: "all" | HostId) => {
+    dispatch({ type: "history-host", host });
+  };
+
+  return { openPanel, generate, apply, copyPreview, cancel, ping, deleteHistoryEntry, undoDeleteHistory, setHistoryHost, selectedText };
 }
 
 export function StudioProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reduceStudio, undefined, createInitialState);
   const abortRef = useRef<AbortController | null>(null);
+  const generationRef = useRef(0);
   const [ready, setReady] = useState(false);
   const persistSnapshot = useRef("");
+  const lastPersistAt = useRef(0);
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(storageKey) ?? localStorage.getItem("tajpo.studio.v1");
+      // A newer-format payload always wins: a deliberate empty history must
+      // never be repopulated from the legacy key.
+      const v2 = localStorage.getItem(storageKey);
+      const raw = v2 !== null ? v2 : localStorage.getItem(legacyStorageKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StudioState>;
+        const parsed: unknown = JSON.parse(raw);
+        const safe = sanitizeStoredState(parsed);
+        const storedOnboarding = isRecord(parsed) && typeof parsed.onboardingOpen === "boolean" ? parsed.onboardingOpen : undefined;
         dispatch({
           type: "hydrate",
           state: {
-            ...parsed,
-            onboardingOpen: parsed.onboardingOpen ?? !localStorage.getItem("tajpo.studio.onboarded"),
+            ...safe,
+            onboardingOpen: storedOnboarding ?? !localStorage.getItem(onboardedKey),
           },
         });
       }
@@ -545,11 +770,38 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
+    const now = Date.now();
+    // Partial tokens arrive far faster than storage should be written: throttle
+    // while streaming, flush as soon as the stream ends.
+    if (!shouldWritePersist(state.isWorking, lastPersistAt.current, now)) return;
     const snapshot = JSON.stringify(persistable(state));
     if (snapshot === persistSnapshot.current) return;
-    persistSnapshot.current = snapshot;
-    localStorage.setItem(storageKey, snapshot);
-    if (!state.onboardingOpen) localStorage.setItem("tajpo.studio.onboarded", "1");
+    try {
+      localStorage.setItem(storageKey, snapshot);
+      persistSnapshot.current = snapshot;
+      lastPersistAt.current = now;
+    } catch {
+      lastPersistAt.current = now;
+      // Quota exceeded or storage unavailable: retry with progressively smaller payloads.
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(degradedPersistable(state, false)));
+        persistSnapshot.current = snapshot;
+        dispatch({ type: "toast", toast: { message: "Session too large to save — history was not persisted", kind: "error" } });
+      } catch {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(degradedPersistable(state, true)));
+          persistSnapshot.current = snapshot;
+          dispatch({ type: "toast", toast: { message: "Session too large to save — history was not persisted", kind: "error" } });
+        } catch {
+          /* storage unavailable; keep the session in memory */
+        }
+      }
+    }
+    try {
+      if (!state.onboardingOpen) localStorage.setItem(onboardedKey, "1");
+    } catch {
+      /* storage unavailable */
+    }
   }, [ready, state]);
 
   useEffect(() => {
@@ -571,11 +823,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(id);
   }, [state.toast]);
 
-  const actions = useMemo(() => bindActions(state, dispatch, abortRef), [state]);
+  const actions = useMemo(() => bindActions(state, dispatch, abortRef, generationRef), [state]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const shortcut = state.settings.shortcut;
+      const editable = isEditableTarget(event.target);
       const key = event.key.toLowerCase();
       const hasModifier = shortcut.alt || shortcut.shift || shortcut.meta || shortcut.ctrl;
       const matchesShortcut =
@@ -591,25 +844,23 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         return;
       }
       if ((event.metaKey || event.ctrlKey) && key === "z" && !event.shiftKey && !state.panelOpen) {
-        const target = event.target as HTMLElement | null;
-        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
+        if (editable) return;
         event.preventDefault();
         dispatch({ type: "undo" });
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && (key === "y" || (key === "z" && event.shiftKey))) {
-        const target = event.target as HTMLElement | null;
-        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT") && !state.panelOpen) return;
+      if ((event.metaKey || event.ctrlKey) && (key === "y" || (key === "z" && event.shiftKey)) && !state.panelOpen) {
+        if (editable) return;
         event.preventDefault();
         dispatch({ type: "redo" });
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      if (!editable && (event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
         dispatch({ type: "toggle-settings", open: true });
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === "h") {
+      if (!editable && (event.metaKey || event.ctrlKey) && event.shiftKey && key === "h") {
         event.preventDefault();
         dispatch({ type: "toggle-history", open: true });
         return;
@@ -628,7 +879,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         event.preventDefault();
         actions.apply();
       }
-      if (/^[1-9]$/.test(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (!editable && /^[1-9]$/.test(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const next = (
           [
             "correct",
@@ -663,7 +914,9 @@ export function shortcutLabel(shortcut: StudioSettings["shortcut"]): string {
 }
 
 export function visibleHistory(state: StudioState): HistoryEntry[] {
-  return filterHistory(state.history, state.historyQuery, state.historyAction);
+  const filtered = filterHistory(state.history, state.historyQuery, state.historyAction);
+  if (state.historyHost === "all") return filtered;
+  return filtered.filter((entry) => entry.host === state.historyHost);
 }
 
 export { defaultSettings };
