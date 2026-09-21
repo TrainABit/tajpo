@@ -45,6 +45,7 @@ final class InlinePanelController {
 private struct InlineRewriteView: View {
     @ObservedObject var model: AppModel
     let close: () -> Void
+    @State private var showDiff = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -76,7 +77,7 @@ private struct InlineRewriteView: View {
             .pickerStyle(.segmented)
             .onChange(of: model.length) { _, value in
                 model.settings.rewriteLength = value
-                Task { await model.runCurrentCapture() }
+                model.scheduleParameterRewrite()
             }
 
             if model.action == .changeTone {
@@ -86,7 +87,7 @@ private struct InlineRewriteView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: model.tone) { _, _ in
-                        Task { await model.runCurrentCapture() }
+                        model.scheduleParameterRewrite()
                     }
                     if let name = model.presets.selected?.name {
                         Text("Selected tone wins if it conflicts with the \(name) preset.")
@@ -103,21 +104,29 @@ private struct InlineRewriteView: View {
             }
 
             HStack(alignment: .top, spacing: 12) {
-                textColumn(title: "Original", text: model.originalText, placeholder: emptyOriginal, emphasizeError: false)
-                textColumn(
-                    title: "Rewrite",
-                    text: displayedPreview,
-                    placeholder: emptyPreview,
-                    emphasizeError: model.preview.isEmpty && model.isError
-                )
+                if showDiff, !model.preview.isEmpty {
+                    diffColumn
+                } else {
+                    textColumn(title: "Original", text: model.originalText, placeholder: emptyOriginal, emphasizeError: false)
+                    textColumn(
+                        title: "Rewrite",
+                        text: displayedPreview,
+                        placeholder: emptyPreview,
+                        emphasizeError: model.preview.isEmpty && model.isError
+                    )
+                }
             }
 
             HStack(spacing: 8) {
+                Button(showDiff ? "Hide diff" : "Show diff") {
+                    showDiff.toggle()
+                }
+                .disabled(model.preview.isEmpty)
                 Button("Replace") {
                     Task { await model.applyPreview() }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(model.preview.isEmpty || model.isWorking)
+                .disabled(model.preview.isEmpty || model.isWorking || model.restorePreviewOnly)
                 .buttonStyle(.borderedProminent)
                 .tint(TajpoTheme.copper)
 
@@ -126,7 +135,12 @@ private struct InlineRewriteView: View {
                 Button("Retry") {
                     Task { await model.runCurrentCapture() }
                 }
-                .disabled(model.isWorking)
+                .disabled(model.isWorking || model.restorePreviewOnly)
+                if model.restorePreviewOnly {
+                    Text("Historic preview — select live text, then press \(model.settings.hotkeyLabel)")
+                        .font(.caption)
+                        .foregroundStyle(TajpoTheme.terracotta)
+                }
                 Button("Undo") {
                     Task { await model.undoLastReplacement() }
                 }
@@ -180,6 +194,23 @@ private struct InlineRewriteView: View {
         return "Choose an action or press 1–9."
     }
 
+    /// Full-width flowing diff: removed tokens struck through in the secondary
+    /// color, added tokens emphasized in the accent color, same tokens plain.
+    private var diffColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: "Diff · removed struck through, additions highlighted")
+            ScrollView {
+                WordDiffView(tokens: WordDiff.tokens(original: model.originalText, rewritten: model.preview))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.body)
+                    .textSelection(.enabled)
+            }
+            .padding(10)
+            .frame(maxHeight: .infinity)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
     private func textColumn(title: String, text: String, placeholder: String, emphasizeError: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(title: title)
@@ -193,6 +224,23 @@ private struct InlineRewriteView: View {
             .padding(10)
             .frame(maxHeight: .infinity)
             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+}
+
+private struct WordDiffView: View {
+    let tokens: [WordDiff.Token]
+
+    var body: some View {
+        tokens.reduce(Text("")) { partial, token in
+            switch token.kind {
+            case .same:
+                partial + Text(token.text)
+            case .added:
+                partial + Text(token.text).bold().foregroundColor(TajpoTheme.copper)
+            case .removed:
+                partial + Text(token.text).strikethrough().foregroundColor(.secondary)
+            }
         }
     }
 }

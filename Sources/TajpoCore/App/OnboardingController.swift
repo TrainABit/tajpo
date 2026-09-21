@@ -37,13 +37,22 @@ private struct OnboardingView: View {
         self.settings = model.settings
         self.finish = finish
     }
-    @State private var step = 0
     @State private var key = ""
     @State private var keyMessage = ""
     @State private var skippedAccessibility = false
     @State private var skippedShortcut = false
     @State private var skippedKey = false
     @State private var testText = "tajpo make this sentance better so i can really just send it."
+
+    /// The current step persists in AppSettings so a dismissed onboarding
+    /// resumes where the user left off.
+    private var step: Int {
+        min(max(settings.onboardingStep, 0), titles.count - 1)
+    }
+
+    private func setStep(_ value: Int) {
+        settings.onboardingStep = min(max(value, 0), titles.count - 1)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -135,13 +144,18 @@ private struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             HStack {
-                if step > 0 { Button("Back") { step -= 1 } }
+                if step > 0 { Button("Back") { setStep(step - 1) } }
                 if canSkip {
-                    Button("Skip") { markSkip(); step += 1 }
+                    Button("Skip") { markSkip(); setStep(step + 1) }
                 }
                 Spacer()
                 Button(step == 4 ? "Finish" : "Continue") {
-                    if step == 4 { finish() } else { step += 1 }
+                    if step == 4 {
+                        setStep(0)
+                        finish()
+                    } else {
+                        setStep(step + 1)
+                    }
                 }
                 .disabled(!canContinue)
                 .keyboardShortcut(.defaultAction)
