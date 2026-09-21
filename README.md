@@ -20,8 +20,9 @@ License: MIT. See `LICENSE`.
 - Correct, improve, rewrite, shorten, tone, expand, simplify, bullets, and continue
 - Length control (shorter / same / longer) applied by the demo engine and sent to remote models
 - Recordable global shortcut (requires at least one modifier)
-- Inline panel with original vs streamed rewrite, optional word diff, token/cost readout, Replace / Copy / Retry / Undo / Redo
-- Writing presets, custom instructions, searchable local history, launch at login, Accessibility status, GitHub Releases update check
+- Inline panel with original vs streamed rewrite, word-level diff view, token/cost readout, Replace / Copy / Retry / Undo / Redo
+- Writing presets, custom instructions ("never use the word …", "no exclamation", "replace X with Y"), searchable local history with per-entry delete, launch at login, Accessibility status, GitHub Releases update check with a last-checked stamp
+- One-click Erase All Data (history, presets, settings, and every saved API key)
 - First-run onboarding that can finish on the demo engine with no API key
 
 ## Run Tajpo Studio (this environment)
@@ -41,7 +42,8 @@ Studio is a finished local workbench, not a screenshot of the Mac app:
 
 - Dark and light desktop themes
 - Length controls, writing presets, and always-on custom instructions (the demo engine honors “never use the word …” and “no exclamation”)
-- History search, filter, and replay
+- History search, filter (by action and host app), per-entry delete with undo, and replay
+- Streaming Stop button, keyboard cheat sheet (`?`), full dialog a11y with focus traps
 - Multi-step undo / redo of replacements
 - Provider settings with a real Test connection (`GET /models` for remote, instant ready for demo)
 - Keyboard: Alt+Shift+T (or your shortcut), 1–9 actions, Ctrl/⌘Enter replace, Esc close, Ctrl/⌘Z undo, Ctrl/⌘Y redo, Ctrl/⌘D diff, Ctrl/⌘, settings
@@ -54,15 +56,19 @@ npm run build
 npm run preview
 ```
 
-Optional remote model (never required): copy `.env.example` to `studio/.env` and set `VITE_OPENAI_API_KEY`. Studio still defaults to the on-device demo.
+Optional remote model (never required): enter the key at runtime in Studio Settings — it is stored in this browser's localStorage. A `VITE_OPENAI_API_KEY` in `studio/.env` is still read for developer convenience, but it bakes the key into the built JavaScript, so do not use it in any bundle you ship. Studio defaults to the on-device demo.
 
-End-to-end browser tests, using the machine’s Chrome:
+Studio is built with React 18 (`react`/`react-dom` ^18.3.1) and Vite.
+
+End-to-end browser tests, using the machine’s Chrome (Playwright `channel: "chrome"`):
 
 ```bash
 cd studio
 npm run build
-npx playwright test
+npm run test:e2e
 ```
+
+The same suite runs in CI on every push and pull request (the `studio-e2e` job in `.github/workflows/ci.yml`).
 
 ## Build the Mac app in Xcode
 
@@ -82,7 +88,7 @@ swift test
 swift build
 ```
 
-GitHub Actions runs `swift test` / `swift build` on `macos-15` and the Studio unit tests on Ubuntu.
+GitHub Actions runs `swift test` / `swift build` on `macos-15`, and the Studio unit tests plus the Playwright e2e suite (in Chrome) on Ubuntu.
 
 ## Local models
 

@@ -35,3 +35,24 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+
+  studio-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Install Chrome for Playwright
+        run: npx playwright install chrome
+      - name: E2E tests
+        run: npm run test:e2e
