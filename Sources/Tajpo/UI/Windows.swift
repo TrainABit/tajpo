@@ -30,6 +30,8 @@ class HostingWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Ends any shortcut recording (which resumes global shortcuts).
+        window?.makeFirstResponder(nil)
         window = nil
         didClose()
     }
@@ -53,6 +55,6 @@ final class OnboardingWindowController: HostingWindowController {
 
     override func didClose() {
         model.shortcutProbe = nil
-        model.hotkeys.resume()
+        model.localTextProvider = nil
     }
 }

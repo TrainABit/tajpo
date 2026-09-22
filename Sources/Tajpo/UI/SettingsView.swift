@@ -70,6 +70,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.tabs = tabs
         self.window = window
     }
+
+    func windowWillClose(_ notification: Notification) {
+        // Ends any shortcut recording (which resumes global shortcuts).
+        window?.makeFirstResponder(nil)
+    }
 }
 
 // MARK: - General
@@ -303,6 +308,9 @@ private struct AISettings: View {
         }
         .formStyle(.grouped)
         .frame(height: 560)
+        .onAppear(perform: syncFromSettings)
+        .onReceive(settings.$baseURL.dropFirst()) { _ in syncFromSettings() }
+        .onReceive(settings.$model.dropFirst()) { _ in syncFromSettings() }
         .confirmationDialog("Remove the saved API key?", isPresented: $confirmRemove) {
             Button("Remove Key", role: .destructive) {
                 do {
@@ -313,6 +321,16 @@ private struct AISettings: View {
                 }
             }
         }
+    }
+
+    /// Settings can change elsewhere (e.g. the setup guide's local-model button).
+    private func syncFromSettings() {
+        let current: Provider = settings.usesOpenAI ? .openAI : .custom
+        if provider != current { provider = current }
+        if !settings.usesOpenAI { baseURLField = settings.baseURL.absoluteString }
+        modelChoice = ModelCatalog.suggested.contains(settings.model) ? settings.model : Self.custom
+        customModel = settings.model
+        projectField = settings.projectID
     }
 
     private func saveKey() {

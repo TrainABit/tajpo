@@ -42,6 +42,7 @@ struct OnboardingView: View {
     @AppStorage(OnboardingStep.storageKey) private var savedStep = 0
     @State private var step: OnboardingStep = .welcome
     @State private var resumed = false
+    @State private var restoring = false
 
     // Connect
     @State private var keyField = ""
@@ -59,6 +60,7 @@ struct OnboardingView: View {
     @State private var launchAtLogin = true
     @State private var checkUpdates = true
     @State private var loginMessage: String?
+    @State private var loginAttempted = false
 
     private let poll = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
@@ -87,11 +89,17 @@ struct OnboardingView: View {
         .frame(width: 640, height: 500)
         .onAppear {
             let restored = OnboardingStep(rawValue: savedStep) ?? .welcome
+            restoring = restored != .welcome
             resumed = restored != .welcome
             step = restored
-            enter(step)
+            enter(restored)
         }
         .onChange(of: step) { old, new in
+            if restoring {
+                // The initial jump to a saved step isn't a user navigation.
+                restoring = false
+                return
+            }
             leave(old)
             enter(new)
             savedStep = new.rawValue
@@ -184,7 +192,6 @@ struct OnboardingView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(keyStatus == .checking)
                         SecureField("or type it (sk-…)", text: $keyField)
-                            .onSubmit { checkKey() }
                     }
                 }
                 keyStatusView
@@ -481,9 +488,11 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        if LaunchAtLogin.isAvailable, launchAtLogin != model.launchAtLoginEnabled {
+        if LaunchAtLogin.isAvailable, launchAtLogin != model.launchAtLoginEnabled, !loginAttempted {
+            loginAttempted = true
             if let message = model.setLaunchAtLogin(launchAtLogin) {
-                loginMessage = message
+                // Show it once; pressing Finish again completes setup anyway.
+                loginMessage = message + " Press the button again to finish."
                 return
             }
         }

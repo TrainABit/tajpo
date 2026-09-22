@@ -29,7 +29,11 @@ final class RewriteSession: ObservableObject {
     @Published var tip: String?
     @Published var showChanges = true
 
+    /// Increases on every reset, so async work can tell its session is gone.
+    private(set) var generation = 0
+
     func reset() {
+        generation += 1
         phase = .capturing
         capture = nil
         action = nil
@@ -45,6 +49,7 @@ final class RewriteSession: ObservableObject {
 
     func captured(_ capture: TextCapture) {
         self.capture = capture
+        error = nil
         phase = .ready
     }
 

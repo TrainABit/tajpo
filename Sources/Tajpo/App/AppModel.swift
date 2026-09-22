@@ -131,6 +131,7 @@ final class AppModel: ObservableObject {
     /// Registers a shortcut and stores it only if registration succeeded.
     @discardableResult
     func applyShortcut(_ shortcut: GlobalShortcut?, for action: HotkeyAction) -> TajpoError? {
+        if hotkeys.isSuspended { resumeHotkeys() }
         do {
             try hotkeys.register(shortcut, for: action)
             settings.storeShortcut(shortcut, for: action)
@@ -145,12 +146,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Ends a suspension (shortcut recording) and reports shortcuts that failed to come back.
+    func resumeHotkeys() {
+        for (action, error) in hotkeys.resume() {
+            hotkeyErrors[action] = error
+        }
+    }
+
     // MARK: Panel flow
 
     func openPanel(thenRun action: RewriteAction? = nil, instruction: String? = nil) {
         guard !isCapturing, !session.isReplacing else { return }
         cancelRun()
         session.reset()
+        let generation = session.generation
         isCapturing = true
         Task {
             defer { isCapturing = false }
@@ -163,6 +172,8 @@ final class AppModel: ObservableObject {
                 } else {
                     capture = try await selection.capture()
                 }
+                // The user closed the panel (or started over) while we were reading.
+                guard session.generation == generation else { return }
                 session.captured(capture)
                 session.tip = nextTip()
                 panel.show(model: self, near: capture.bounds, sourceName: capture.sourceApp?.localizedName)
@@ -173,6 +184,7 @@ final class AppModel: ObservableObject {
                     session.fail(problem)
                 }
             } catch {
+                guard session.generation == generation else { return }
                 session.fail(Self.map(error))
                 panel.show(model: self, near: nil)
             }
@@ -204,7 +216,14 @@ final class AppModel: ObservableObject {
         let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model,
                                             instruction: action == .custom ? instruction : nil)
         let tag = PromptBuilder.tagName(for: capture.text)
-        let client = makeClient(try? keyStore.load(), settings.baseURL, settings.projectID)
+        let key: String?
+        do {
+            key = try keyStore.load()
+        } catch {
+            session.fail(Self.map(error))
+            return
+        }
+        let client = makeClient(key, settings.baseURL, settings.projectID)
         session.begin(action)
         isWorking = true
         status = "Writing…"
@@ -254,10 +273,15 @@ final class AppModel: ObservableObject {
     func replace() {
         guard session.canReplace, let capture = session.capture, let text = session.result else { return }
         session.isReplacing = true
+        let generation = session.generation
         Task {
-            defer { session.isReplacing = false }
+            defer { if session.generation == generation { session.isReplacing = false } }
             if capture.method == .local {
-                localTextProvider?.replacePracticeText(with: text, diff: session.diff)
+                guard let provider = localTextProvider else {
+                    session.report(.targetAppChanged)
+                    return
+                }
+                provider.replacePracticeText(with: text, diff: session.diff)
                 await finishSuccessfully(notice: "Replaced", status: "Replaced")
                 return
             }
@@ -268,9 +292,10 @@ final class AppModel: ObservableObject {
                     await finishSuccessfully(notice: "Replaced", status: "Replaced")
                 } else {
                     settings.recordUse()
-                    closePanel(status: "Pasted. Check the result")
+                    if session.generation == generation { closePanel(status: "Pasted. Check the result") }
                 }
             } catch {
+                guard session.generation == generation else { return }
                 panel.reshow()
                 session.report(Self.map(error))
             }
@@ -291,11 +316,17 @@ final class AppModel: ObservableObject {
 
     /// Shows a short confirmation in the panel, then closes it.
     private func finishSuccessfully(notice: String, status: String) async {
+        let generation = session.generation
         settings.recordUse()
         session.note(notice)
         AccessibilityNotification.Announcement(notice).post()
         try? await Task.sleep(for: .milliseconds(650))
-        closePanel(status: status)
+        // Only close the session this confirmation belongs to.
+        if session.generation == generation {
+            closePanel(status: status)
+        } else {
+            self.status = status
+        }
     }
 
     /// One-time tips that teach features after the user has used the basics.
@@ -317,6 +348,7 @@ final class AppModel: ObservableObject {
     }
 
     func repeatLastAction() {
+        guard !isCapturing else { return }
         guard let lastAction else {
             session.reset()
             session.fail(.nothingToRepeat)
