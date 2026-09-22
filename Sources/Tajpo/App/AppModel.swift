@@ -176,7 +176,9 @@ final class AppModel: ObservableObject {
                 guard session.generation == generation else { return }
                 session.captured(capture)
                 session.tip = nextTip()
-                panel.show(model: self, near: capture.bounds, sourceName: capture.sourceApp?.localizedName)
+                panel.show(model: self, near: capture.bounds,
+                           sourceName: capture.sourceApp?.localizedName ?? (capture.method == .local ? "Practice" : nil),
+                           sourceIcon: capture.sourceApp?.icon)
                 if let action {
                     if let instruction { session.instruction = instruction }
                     run(action)

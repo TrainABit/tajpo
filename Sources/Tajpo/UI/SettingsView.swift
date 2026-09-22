@@ -135,7 +135,7 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 430)
+        .frame(height: 510)
     }
 }
 
@@ -307,7 +307,7 @@ private struct AISettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 560)
+        .frame(height: 490)
         .onAppear(perform: syncFromSettings)
         .onReceive(settings.$baseURL.dropFirst()) { _ in syncFromSettings() }
         .onReceive(settings.$model.dropFirst()) { _ in syncFromSettings() }
@@ -454,7 +454,8 @@ private struct PresetSettings: View {
                         .help("Delete the selected preset")
                         .accessibilityLabel("Delete preset")
                         Spacer()
-                        Button("Restore Built-ins…") { confirmRestore = true }
+                        Button("Restore…") { confirmRestore = true }
+                            .help("Restore the built-in presets")
                             .controlSize(.small)
                     }
                     .buttonStyle(.borderless)

@@ -61,7 +61,7 @@ extension AppModel {
         case .panelError:
             session.reset()
             session.fail(.noSelection)
-            panel.show(model: self, near: nil, sourceName: "TextEdit")
+            panel.show(model: self, near: nil, sourceName: "TextEdit", sourceIcon: Self.demoIcon)
         case .panelLong:
             let long = Array(repeating: Self.demoOriginal, count: 12).joined(separator: "\n\n")
             demoPanel(text: long)
@@ -70,12 +70,16 @@ extension AppModel {
         }
     }
 
+    private static var demoIcon: NSImage {
+        NSWorkspace.shared.icon(forFile: "/System/Applications/TextEdit.app")
+    }
+
     private func demoPanel(text: String, blocker: TajpoError? = nil) {
         session.reset()
         session.captured(TextCapture(text: text, method: .local, element: nil, selectedRange: nil,
                                      sourceApp: nil, bounds: nil, replaceBlocker: blocker))
         let screen = NSScreen.main?.visibleFrame ?? .zero
         let selection = CGRect(x: screen.midX - 150, y: screen.maxY - 180, width: 300, height: 18)
-        panel.show(model: self, near: selection, sourceName: "TextEdit")
+        panel.show(model: self, near: selection, sourceName: "TextEdit", sourceIcon: Self.demoIcon)
     }
 }

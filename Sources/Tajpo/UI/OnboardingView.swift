@@ -38,6 +38,7 @@ struct OnboardingView: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var settings: AppSettings
     @StateObject private var practice = PracticeText()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @AppStorage(OnboardingStep.storageKey) private var savedStep = 0
     @State private var step: OnboardingStep = .welcome
@@ -51,6 +52,7 @@ struct OnboardingView: View {
 
     // Try it
     @State private var choosingShortcut = false
+    @State private var showTrouble = false
 
     // Every app
     @State private var requestedAccess: Date?
@@ -83,10 +85,18 @@ struct OnboardingView: View {
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .id(step)
+                .transition(.opacity)
             navigation
         }
-        .padding(28)
-        .frame(width: 640, height: 500)
+        .padding(.horizontal, 32)
+        .padding(.top, 22)
+        .padding(.bottom, 24)
+        .frame(width: 640)
+        .frame(minHeight: 430)
+        // The window follows each step's height instead of leaving empty space.
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(reduceMotion ? nil : .snappy, value: step)
         .onAppear {
             let restored = OnboardingStep(rawValue: savedStep) ?? .welcome
             restoring = restored != .welcome
@@ -117,7 +127,9 @@ struct OnboardingView: View {
     private var progressBar: some View {
         HStack(spacing: 6) {
             ForEach(OnboardingStep.allCases.filter { $0 != .welcome }, id: \.self) { item in
-                let done = isComplete(item)
+                // Future steps never show a check, even if already satisfied.
+                let done = item.rawValue <= step.rawValue && item != step && isComplete(item)
+                    || item == step && item != .done && isComplete(item)
                 let current = item == step
                 HStack(spacing: 4) {
                     Image(systemName: done ? "checkmark.circle.fill" : (current ? "circle.inset.filled" : "circle"))
@@ -127,7 +139,10 @@ struct OnboardingView: View {
                         .foregroundStyle(current ? .primary : .secondary)
                 }
                 if item != .done {
-                    Rectangle().fill(Color.secondary.opacity(0.3)).frame(height: 1).frame(maxWidth: 40)
+                    Capsule()
+                        .fill(item.rawValue < step.rawValue ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.25))
+                        .frame(height: 2)
+                        .frame(maxWidth: 48)
                 }
             }
         }
@@ -160,53 +175,64 @@ struct OnboardingView: View {
     }
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 14) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 72, height: 72)
+                .accessibilityHidden(true)
             Text("Better writing, in any app")
                 .font(.largeTitle.bold())
-            DemoAnimation()
             Text("Select text, press a shortcut, and Tajpo fixes, polishes, shortens, or changes its tone right where you're writing. You always see the result before anything changes.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Setup takes about 3 minutes, plus about 5 more if you still need to add OpenAI API credit.")
+                .frame(maxWidth: 500)
+            DemoAnimation()
+                .padding(.top, 4)
+            Label("Setup takes about 3 minutes, plus about 5 more if you still need to add OpenAI API credit.", systemImage: "clock")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private var connect: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(settings.usesOpenAI ? "Connect your OpenAI account" : "Connect your AI server")
-                .font(.largeTitle.bold())
+        VStack(alignment: .leading, spacing: 14) {
             if settings.usesOpenAI {
-                Text("Tajpo runs on your own OpenAI API key. Your text goes straight from your Mac to OpenAI, never to us. Tajpo has no servers.")
-                    .fixedSize(horizontal: false, vertical: true)
+                StepHeader(symbol: "key.fill", tint: .blue, title: "Connect your OpenAI account",
+                           subtitle: "Tajpo runs on your own API key. Your text goes straight from your Mac to OpenAI, never to us.")
                 if let hint = model.apiKeyHint, keyField.isEmpty, keyStatus == .idle || keyStatus == .connected {
                     Label("Connected · \(hint)", systemImage: "checkmark.seal.fill")
+                        .font(.headline)
                         .foregroundStyle(.green)
+                        .card()
                 } else {
-                    checklistRow(1, "Add credit at OpenAI ($5 is plenty to start)", link: ("Open Billing", Links.billing))
-                    checklistRow(2, "Create an API key", link: ("Open API Keys", Links.apiKeys))
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        numberBadge(3)
-                        Text("Paste it here")
-                        Button("Paste Key") { pasteKey() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(keyStatus == .checking)
-                        SecureField("or type it (sk-…)", text: $keyField)
+                    VStack(alignment: .leading, spacing: 12) {
+                        checklistRow(1, "Add credit at OpenAI ($5 is plenty to start)", link: ("Open Billing", Links.billing))
+                        Divider()
+                        checklistRow(2, "Create an API key", link: ("Open API Keys", Links.apiKeys))
+                        Divider()
+                        HStack(alignment: .center, spacing: 8) {
+                            numberBadge(3)
+                            Text("Paste it here")
+                            SecureField("sk-…", text: $keyField)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Paste Key") { pasteKey() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(keyStatus == .checking)
+                        }
                     }
+                    .card()
                 }
                 keyStatusView
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(ModelCatalog.costHint)
-                        Text("Prepaid means you're never billed more than you add. When credit runs out, Tajpo just stops until you top up. This is separate from ChatGPT Plus.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(ModelCatalog.costHint, systemImage: "dollarsign.circle")
+                    Label("Prepaid credit means you're never billed more than you add. It's separate from ChatGPT Plus.", systemImage: "creditcard")
+                    Label("Your key is stored only in your Mac's Keychain.", systemImage: "lock")
                 }
-                Text("Your key is stored only in your Mac's Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 DisclosureGroup("No OpenAI account? Use a free local model instead", isExpanded: $showLocalOption) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("If you run Ollama or LM Studio on this Mac, Tajpo can use it with no key and no cost. Your text never leaves your Mac.")
@@ -221,15 +247,18 @@ struct OnboardingView: View {
                 }
                 .font(.callout)
             } else {
-                Text("Tajpo is set to use \(settings.baseURL.absoluteString). Your text goes only to that server.")
+                StepHeader(symbol: "server.rack", tint: .blue, title: "Connect your AI server",
+                           subtitle: "Tajpo is set to use \(settings.baseURL.absoluteString). Your text goes only to that server.")
                 keyStatusView
-                Button("Check Connection") { checkConnection() }
-                Button("Use OpenAI instead") {
-                    try? settings.setBaseURL(ModelCatalog.defaultBaseURL.absoluteString)
-                    keyStatus = .idle
-                    model.refreshStatus()
+                HStack {
+                    Button("Check Connection") { checkConnection() }
+                    Button("Use OpenAI instead") {
+                        try? settings.setBaseURL(ModelCatalog.defaultBaseURL.absoluteString)
+                        keyStatus = .idle
+                        model.refreshStatus()
+                    }
+                    .buttonStyle(.link)
                 }
-                .buttonStyle(.link)
             }
         }
     }
@@ -271,56 +300,64 @@ struct OnboardingView: View {
     }
 
     private var tryIt: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Try it").font(.largeTitle.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            StepHeader(symbol: "wand.and.stars", tint: .purple, title: "Try it",
+                       subtitle: "Practice here first. This box works without any permission.")
             if model.needsAPIKey {
-                GroupBox {
-                    HStack {
-                        Label("Tajpo needs your OpenAI key before it can edit text.", systemImage: "key")
-                        Spacer()
-                        Button("Add Key") { step = .connect }
-                    }
-                    .padding(4)
+                HStack {
+                    Label("Tajpo needs your OpenAI key before it can edit text.", systemImage: "key")
+                    Spacer()
+                    Button("Add Key") { step = .connect }
                 }
+                .card(tint: .orange)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                numberBadge(1)
+                Text("Select the sentence below.")
+                Spacer().frame(width: 8)
+                numberBadge(2)
                 Text("Press")
                 KeyCaps(shortcut: settings.rewriteShortcut)
-                Text("then pick **Correct** and **Replace**.")
             }
-            .font(.title3)
             TextEditor(text: $practice.text)
-                .font(.body)
-                .frame(height: 80)
+                .font(.title3)
+                .frame(height: 70)
                 .scrollIndicators(.never)
                 .scrollContentBackground(.hidden)
-                .padding(6)
+                .padding(8)
                 .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-            Text("Tip: click in the box first. You can also type a sentence of your own.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(practice.fixes == nil ? 0.5 : 0), lineWidth: 2))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
             if let fixes = practice.fixes {
                 Label(fixes > 0 ? "Fixed \(fixes) \(fixes == 1 ? "mistake" : "mistakes"). That's the whole workflow." : "Done. That's the whole workflow.",
                       systemImage: "sparkles")
                     .font(.headline)
                     .foregroundStyle(.green)
+                    .card(tint: .green)
                     .transition(.scale.combined(with: .opacity))
+            } else {
+                Text("Then pick **Correct** and **Replace** in the panel that opens. You can also type a sentence of your own.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Or click here to open Tajpo") { model.openPanel() }
-                    .buttonStyle(.link)
-                Spacer()
-                if choosingShortcut {
-                    ShortcutSetting(model: model, action: .rewrite)
-                        .frame(maxWidth: 360)
-                } else if let shortcut = settings.rewriteShortcut {
-                    Text("\(shortcut.displayString) works in almost every app.")
-                        .foregroundStyle(.secondary)
-                    Button("Choose Another") { choosingShortcut = true }
-                        .buttonStyle(.link)
+            DisclosureGroup("Nothing happens when you press the shortcut?", isExpanded: $showTrouble) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Another app may use the same keys.")
+                        Button("Choose Another Shortcut") { choosingShortcut = true }
+                    }
+                    if choosingShortcut {
+                        ShortcutSetting(model: model, action: .rewrite)
+                            .frame(maxWidth: 420)
+                    }
+                    HStack {
+                        Text("Or open the panel without it:")
+                        Button("Open Tajpo Here") { model.openPanel() }
+                    }
                 }
+                .font(.callout)
+                .padding(.top, 4)
             }
             .font(.callout)
         }
@@ -329,9 +366,8 @@ struct OnboardingView: View {
 
     private var everywhere: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Use Tajpo in every app").font(.largeTitle.bold())
-            Text("To read the text you select in Mail, Notes, Slack, and other apps, and to put the improved version back, macOS needs you to turn on Accessibility for Tajpo.")
-                .fixedSize(horizontal: false, vertical: true)
+            StepHeader(symbol: "macwindow.on.rectangle", tint: .green, title: "Use Tajpo in every app",
+                       subtitle: "To read the text you select in Mail, Notes, Slack, and other apps, and to put the improved version back, macOS needs you to turn on Accessibility for Tajpo.")
             HStack(alignment: .top, spacing: 16) {
                 promiseColumn("Tajpo does", symbol: "checkmark", color: .green, items: [
                     "Read the text you select, only when you press the shortcut",
@@ -343,6 +379,16 @@ struct OnboardingView: View {
                     "Send anything until you choose an action",
                     "Touch password fields"
                 ])
+            }
+            .card()
+            if !model.accessibilityTrusted {
+                HStack(spacing: 14) {
+                    SettingsRowPreview()
+                    Text("In System Settings, switch Tajpo on. You may need to enter your Mac password.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Text("macOS will describe this as letting Tajpo “control your computer”. That's the standard wording for any app that edits text in other apps.")
                 .font(.callout)
@@ -376,39 +422,51 @@ struct OnboardingView: View {
     private var done: some View {
         let missing = missingItems
         return VStack(alignment: .leading, spacing: 14) {
-            Text(missing.isEmpty ? "You're ready" : "Almost there").font(.largeTitle.bold())
             if missing.isEmpty {
+                StepHeader(symbol: "checkmark.seal.fill", tint: .green, title: "You're all set",
+                           subtitle: "Tajpo is ready in every app.")
                 HStack(spacing: 10) {
                     Text("Select text anywhere, then press")
                     KeyCaps(shortcut: settings.rewriteShortcut)
+                    Spacer()
+                    Button("Try It in TextEdit") { openTextEdit() }
                 }
                 .font(.title3)
-                Button("Try It in TextEdit") { openTextEdit() }
+                .card()
             } else {
-                Text(missing.count == 1 ? "One thing is still missing. You can finish it now or later from the menu bar." : "A few things are still missing. You can finish them now or later from the menu bar.")
-                    .foregroundStyle(.secondary)
-                ForEach(missing, id: \.title) { item in
-                    HStack {
-                        Image(systemName: "circle.dashed").foregroundStyle(.secondary)
-                        Text(item.title)
-                        Spacer()
-                        Button("Add Now") { step = item.step }
+                StepHeader(symbol: "flag.checkered", tint: .orange, title: "Almost there",
+                           subtitle: missing.count == 1
+                               ? "One thing is still missing. You can finish it now or later from the menu bar."
+                               : "A few things are still missing. You can finish them now or later from the menu bar.")
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(missing.enumerated()), id: \.element.title) { index, item in
+                        if index > 0 { Divider() }
+                        HStack {
+                            Image(systemName: "circle.dashed").foregroundStyle(.orange)
+                            Text(item.title)
+                            Spacer()
+                            Button("Add Now") { step = item.step }
+                        }
                     }
                 }
+                .card()
             }
-            Divider()
-            if LaunchAtLogin.isAvailable {
-                Toggle("Start Tajpo when you log in (recommended, so the shortcut always works)", isOn: $launchAtLogin)
-                if let loginMessage {
-                    Text(loginMessage).font(.caption).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 10) {
+                if LaunchAtLogin.isAvailable {
+                    Toggle("Start Tajpo when you log in (recommended, so the shortcut always works)", isOn: $launchAtLogin)
+                    if let loginMessage {
+                        Text(loginMessage).font(.caption).foregroundStyle(.orange)
+                    }
+                } else if AppLocation.isTemporary {
+                    Label("Tajpo is running from a temporary location. Move it to Applications so it can start at login.", systemImage: "folder")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
                 }
-            } else if AppLocation.isTemporary {
-                Label("Tajpo is running from a temporary location. Move it to Applications so it can start at login.", systemImage: "folder")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                Toggle("Check for new versions weekly (asks GitHub for the latest version number, nothing else)", isOn: $checkUpdates)
             }
-            Toggle("Check for new versions weekly (asks GitHub for the latest version number, nothing else)", isOn: $checkUpdates)
+            .card()
             Label("Tajpo lives in your menu bar, where you'll find settings, presets, and this guide.", systemImage: "menubar.arrow.up.rectangle")
+                .font(.callout)
                 .foregroundStyle(.secondary)
         }
     }
@@ -603,7 +661,7 @@ struct OnboardingView: View {
     // MARK: Pieces
 
     private func checklistRow(_ number: Int, _ text: String, link: (String, URL)) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             numberBadge(number)
             Text(text)
             Spacer()
@@ -642,6 +700,70 @@ struct OnboardingView: View {
         } else {
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+/// Step title with a colored icon tile and a one-line explanation.
+private struct StepHeader: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(RoundedRectangle(cornerRadius: 10).fill(tint.gradient))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title.bold())
+                    .accessibilityAddTraits(.isHeader)
+                Text(subtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// A picture of the Accessibility list row to look for in System Settings.
+private struct SettingsRowPreview: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 20, height: 20)
+            Text("Tajpo")
+            Spacer(minLength: 16)
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(width: 30, height: 18)
+                .overlay(alignment: .trailing) {
+                    Circle().fill(.white).padding(2).shadow(radius: 0.5)
+                }
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(width: 200)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tajpo, switched on")
+    }
+}
+
+extension View {
+    /// A rounded, lightly filled container.
+    func card(tint: Color = .primary) -> some View {
+        padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(tint == .primary ? 0.045 : 0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.07)))
     }
 }
 
