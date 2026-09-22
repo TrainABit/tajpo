@@ -95,7 +95,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshStatus() {
-        let trusted = selection.isTrusted
+        let trusted = selection.isTrusted && !DemoScene.simulatesNoAccess
         if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
         let secure = IsSecureEventInputEnabled()
         if secure != secureInputActive { secureInputActive = secure }

@@ -21,6 +21,11 @@ enum DemoScene: String, CaseIterable {
     case panelError = "panel-error"
     case panelLong = "panel-long"
 
+    /// Shows the "not allowed yet" state even on a Mac that granted Accessibility.
+    static var simulatesNoAccess: Bool {
+        UserDefaults.standard.bool(forKey: "TajpoDemoNoAccess")
+    }
+
     static var requested: DemoScene? {
         UserDefaults.standard.string(forKey: "TajpoDemo").flatMap(DemoScene.init(rawValue:))
     }

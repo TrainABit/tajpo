@@ -16,9 +16,17 @@ SCENES=(
 
 capture() {
   local mode="$1" scene="$2"
-  "$BIN" -TajpoDemo "$scene" -TajpoDemoAppearance "$mode" >/dev/null 2>&1 &
+  local extra=()
+  [[ "$scene" == onboarding-everywhere ]] && extra=(-TajpoDemoNoAccess YES)
+  "$BIN" -TajpoDemo "$scene" -TajpoDemoAppearance "$mode" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1 &
   local pid=$!
-  sleep 5
+  sleep 4
+  # Bring regular windows to the front so they render as active. The
+  # floating panel is left alone; it takes keyboard focus by itself.
+  if [[ "$scene" != panel-* ]]; then
+    open "$ROOT/build/Tajpo.app" >/dev/null 2>&1 || true
+  fi
+  sleep 2
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "::error::Tajpo exited while showing $scene"
     return
@@ -27,6 +35,8 @@ capture() {
   sips -Z 1600 "$OUT/$mode-$scene.png" >/dev/null 2>&1 || true
   kill "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
+  # In case `open` started a second copy instead of activating this one.
+  pkill -f "$BIN" 2>/dev/null || true
   sleep 1
 }
 
@@ -34,4 +44,4 @@ defaults write com.trainabit.tajpo completedOnboarding -bool true
 
 for scene in "${SCENES[@]}"; do capture light "$scene"; done
 
-for scene in onboarding-welcome onboarding-connect settings-ai panel-finished panel-error; do capture dark "$scene"; done
+for scene in onboarding-welcome onboarding-connect onboarding-tryit settings-ai panel-finished panel-error; do capture dark "$scene"; done
