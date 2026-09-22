@@ -31,6 +31,9 @@ extension AppModel {
     static let demoCorrected = "They're going to the library tomorrow, but he and I think it's closed. Can you check the opening hours?"
 
     func showDemo(_ scene: DemoScene) {
+        if UserDefaults.standard.string(forKey: "TajpoDemoAppearance") == "dark" {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
         switch scene {
         case .onboardingWelcome: showOnboarding(at: OnboardingStep.welcome.rawValue)
         case .onboardingConnect: showOnboarding(at: OnboardingStep.connect.rawValue)

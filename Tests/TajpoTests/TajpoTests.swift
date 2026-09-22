@@ -421,3 +421,28 @@ import Testing
         #expect(!AppPolicy.isTerminal(bundleID: nil))
     }
 }
+
+// MARK: - Versions
+
+@Suite struct VersionTests {
+    @Test func parsesTagsAndComparesNumerically() throws {
+        let a = try #require(AppVersion("v0.9.0"))
+        let b = try #require(AppVersion("0.10"))
+        #expect(a < b)
+        #expect(b.description == "0.10.0")
+        #expect(AppVersion("1.2.3.4") == nil)
+        #expect(AppVersion("1.x") == nil)
+        #expect(AppVersion("development build") == nil)
+    }
+
+    @Test func releaseIsUpdateOnlyWhenNewerAndPublished() throws {
+        let json = #"{"tag_name":"v0.4.0","html_url":"https://example.com","draft":false,"prerelease":false}"#
+        let release = try JSONDecoder().decode(ReleaseInfo.self, from: Data(json.utf8))
+        #expect(release.isUpdate(from: "0.3.0"))
+        #expect(!release.isUpdate(from: "0.4.0"))
+        #expect(!release.isUpdate(from: "1.0"))
+        #expect(!release.isUpdate(from: "development build"))
+        let pre = ReleaseInfo(tag_name: "v9.0.0", html_url: "", draft: false, prerelease: true)
+        #expect(!pre.isUpdate(from: "0.3.0"))
+    }
+}

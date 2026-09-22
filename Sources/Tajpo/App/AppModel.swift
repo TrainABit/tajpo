@@ -33,6 +33,7 @@ final class AppModel: ObservableObject {
     let presets: PresetStore
     let session = RewriteSession()
     let hotkeys = HotkeyManager()
+    let updates = UpdateChecker()
 
     private let selection: TextSelectionService
     private let keyStore: APIKeyStoring
@@ -85,6 +86,7 @@ final class AppModel: ObservableObject {
         }
         panel.onClose = { [weak self] in self?.panelClosed() }
         panel.onOutsideClick = { [weak self] in self?.outsideClick() }
+        updates.checkOnLaunchIfDue()
         if let scene = DemoScene.requested {
             showDemo(scene)
         } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") {

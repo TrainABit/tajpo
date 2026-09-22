@@ -56,6 +56,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
             let controller = NSHostingController(rootView: root.frame(width: 580))
             controller.sizingOptions = [.preferredContentSize]
+            controller.title = tab.title
             let item = NSTabViewItem(viewController: controller)
             item.label = tab.title
             item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
@@ -75,7 +76,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 private struct GeneralSettings: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var updates: UpdateChecker
     @State private var loginMessage: String?
+
+    init(model: AppModel) {
+        self.model = model
+        updates = model.updates
+    }
 
     var body: some View {
         Form {
@@ -105,10 +112,16 @@ private struct GeneralSettings: View {
                 if let loginMessage {
                     ErrorLabel(text: loginMessage)
                 }
+                Toggle("Check for updates weekly", isOn: Binding(
+                    get: { updates.automatic },
+                    set: { updates.automatic = $0 }
+                ))
                 Button("Show Setup Guide…") { model.showOnboarding() }
             } header: {
-                Text("Startup")
+                Text("Startup and updates")
             } footer: {
+                Text("The update check asks GitHub for the latest release number. It sends nothing about you or your text.")
+                    .foregroundStyle(.secondary)
                 if AppLocation.isTemporary {
                     Text("Move Tajpo to your Applications folder to start it at login.").foregroundStyle(.secondary)
                 } else if !LaunchAtLogin.isAvailable {
@@ -235,7 +248,8 @@ private struct AISettings: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    SecureField(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it", text: $keyField)
+                    SecureField("API key", text: $keyField,
+                                prompt: Text(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it"))
                         .onSubmit(saveKey)
                     Button("Save") { saveKey() }
                         .disabled(keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -270,7 +284,7 @@ private struct AISettings: View {
                 }
                 if modelChoice == Self.custom {
                     HStack {
-                        TextField("Model name", text: $customModel)
+                        TextField("Model name", text: $customModel, prompt: Text("e.g. llama3.1"))
                             .onSubmit { applyModel(customModel) }
                         Button("Use") { applyModel(customModel) }
                     }
@@ -281,7 +295,7 @@ private struct AISettings: View {
                         .foregroundStyle(.secondary)
                 }
                 if provider == .openAI {
-                    TextField("OpenAI project ID (optional)", text: $projectField)
+                    TextField("Project ID", text: $projectField, prompt: Text("Optional"))
                         .onSubmit { settings.setProjectID(projectField) }
                 }
                 MessageView(message: modelMessage)

@@ -9,7 +9,7 @@ struct TajpoApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(model: model, presets: model.presets, settings: model.settings)
+            MenuContent(model: model, presets: model.presets, settings: model.settings, updates: model.updates)
         } label: {
             Label(menuBarTitle, systemImage: menuBarSymbol)
         }
@@ -48,8 +48,12 @@ struct MenuContent: View {
     @ObservedObject var model: AppModel
     @ObservedObject var presets: PresetStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var updates: UpdateChecker
 
     var body: some View {
+        if let release = updates.available {
+            Button("Update Available: Tajpo \(release.version?.description ?? release.tag_name)…") { updates.openAvailable() }
+        }
         if model.needsAPIKey {
             Button("Finish Setup: Add Your OpenAI Key…") { model.showOnboarding(at: OnboardingStep.connect.rawValue) }
         }
@@ -91,6 +95,8 @@ struct MenuContent: View {
         Button("Settings…") { model.showSettings() }
             .keyboardShortcut(",")
         Button("Setup Guide…") { model.showOnboarding() }
+        Button("Check for Updates…") { Task { await updates.check(userInitiated: true) } }
+            .disabled(updates.isChecking)
         Button("Report a Problem…") { model.reportProblem() }
         Button("About Tajpo") { model.showAbout() }
 

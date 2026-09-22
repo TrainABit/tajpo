@@ -18,7 +18,7 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
     private var clickMonitor: Any?
 
     private static let sizeKey = "panelSize"
-    static let minimumSize = NSSize(width: 440, height: 240)
+    static let minimumSize = NSSize(width: 480, height: 240)
 
     func show(model: AppModel, near selection: CGRect?, sourceName: String? = nil) {
         let panel = self.panel ?? makePanel(model: model)
@@ -64,7 +64,7 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
 
     private func makePanel(model: AppModel) -> NSPanel {
         let saved = UserDefaults.standard.string(forKey: Self.sizeKey).map(NSSizeFromString)
-        var size = saved ?? NSSize(width: 500, height: 380)
+        var size = saved ?? NSSize(width: 540, height: 360)
         size.width = max(size.width, Self.minimumSize.width)
         size.height = max(size.height, Self.minimumSize.height)
         let panel = RewritePanel(
@@ -187,21 +187,24 @@ struct InlineRewriteView: View {
                     actionLabel(action.title, selected: session.action == action)
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(action.shortcutNumber))), modifiers: .command)
+                .fixedSize()
                 .help("\(action.title) (⌘\(action.shortcutNumber))")
                 .accessibilityAddTraits(session.action == action ? .isSelected : [])
             }
             Menu {
                 ForEach(RewriteTone.allCases) { tone in
-                    Button(tone.title) { model.runTone(tone) }
+                    Button { model.runTone(tone) } label: {
+                        if tone == session.tone { Label(tone.title, systemImage: "checkmark") } else { Text(tone.title) }
+                    }
                 }
             } label: {
-                actionLabel("Tone: \(session.tone.title)", selected: session.action == .changeTone)
+                actionLabel("Tone", selected: session.action == .changeTone)
             } primaryAction: {
                 model.run(.changeTone)
             }
             .menuStyle(.button)
             .fixedSize()
-            .help("Change Tone (⌘5). Click the arrow to pick a tone.")
+            .help("Change Tone to \(session.tone.title) (⌘5). Click the arrow to pick another tone.")
             .accessibilityAddTraits(session.action == .changeTone ? .isSelected : [])
             // Menus don't honor keyboard shortcuts reliably, so ⌘5 lives on a hidden button.
             Button("") { model.run(.changeTone) }
@@ -210,7 +213,6 @@ struct InlineRewriteView: View {
                 .opacity(0)
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
-            presetMenu
         }
         .buttonStyle(.bordered)
         .disabled(!session.canRun)
@@ -236,6 +238,7 @@ struct InlineRewriteView: View {
             Button("Edit Presets…") { model.showSettings(tab: .presets) }
         } label: {
             Label(presets.selected?.name ?? "No preset", systemImage: "text.badge.star")
+                .font(.callout)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -299,6 +302,8 @@ struct InlineRewriteView: View {
                     Text(outputTitle).foregroundStyle(.secondary)
                 }
                 Spacer()
+                presetMenu
+                    .disabled(session.isRunning)
                 Toggle("Show changes", isOn: $session.showChanges)
                     .toggleStyle(.checkbox)
                     .disabled(session.diff == nil)
@@ -470,7 +475,11 @@ struct InlineRewriteView: View {
 
     static func attributed(_ diff: [DiffSegment]) -> AttributedString {
         var result = AttributedString()
-        for segment in diff {
+        for (index, segment) in diff.enumerated() {
+            // Keep a removed word and its replacement visually apart.
+            if segment.kind == .inserted, index > 0, diff[index - 1].kind == .removed {
+                result += AttributedString("\u{2009}")
+            }
             var part = AttributedString(segment.text)
             switch segment.kind {
             case .same:

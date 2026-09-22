@@ -57,6 +57,7 @@ struct OnboardingView: View {
 
     // Done
     @State private var launchAtLogin = true
+    @State private var checkUpdates = true
     @State private var loginMessage: String?
 
     private let poll = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
@@ -83,7 +84,7 @@ struct OnboardingView: View {
             navigation
         }
         .padding(28)
-        .frame(width: 640, height: 540)
+        .frame(width: 640, height: 500)
         .onAppear {
             let restored = OnboardingStep(rawValue: savedStep) ?? .welcome
             resumed = restored != .welcome
@@ -398,6 +399,7 @@ struct OnboardingView: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
+            Toggle("Check for new versions weekly (asks GitHub for the latest version number, nothing else)", isOn: $checkUpdates)
             Label("Tajpo lives in your menu bar, where you'll find settings, presets, and this guide.", systemImage: "menubar.arrow.up.rectangle")
                 .foregroundStyle(.secondary)
         }
@@ -485,6 +487,7 @@ struct OnboardingView: View {
                 return
             }
         }
+        model.updates.automatic = checkUpdates
         savedStep = 0
         model.completeOnboarding()
         model.celebrateMenuBarIcon()

@@ -16,7 +16,7 @@ SCENES=(
 
 capture() {
   local mode="$1" scene="$2"
-  "$BIN" -TajpoDemo "$scene" >/dev/null 2>&1 &
+  "$BIN" -TajpoDemo "$scene" -TajpoDemoAppearance "$mode" >/dev/null 2>&1 &
   local pid=$!
   sleep 5
   if ! kill -0 "$pid" 2>/dev/null; then
@@ -32,9 +32,6 @@ capture() {
 
 defaults write com.trainabit.tajpo completedOnboarding -bool true
 
-defaults write -g AppleInterfaceStyle Light 2>/dev/null; defaults delete -g AppleInterfaceStyle 2>/dev/null
 for scene in "${SCENES[@]}"; do capture light "$scene"; done
 
-defaults write -g AppleInterfaceStyle Dark
 for scene in onboarding-welcome onboarding-connect settings-ai panel-finished panel-error; do capture dark "$scene"; done
-defaults delete -g AppleInterfaceStyle 2>/dev/null || true

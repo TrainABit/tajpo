@@ -9,7 +9,8 @@ Tajpo is a macOS app that edits text you select. It has no servers, no accounts,
 - **The text you select, only when you choose an action** (Correct, Improve, a custom instruction, and so on), together with the instructions for that action. It goes directly from your Mac to the AI server set in Settings ▸ AI Provider:
   - **OpenAI (default).** You use your own OpenAI API key and are OpenAI's customer. OpenAI's own terms and privacy policy apply to that data. See [how OpenAI handles API data](https://platform.openai.com/docs/guides/your-data).
   - **Another server you configure**, for example Ollama or LM Studio running on your Mac. Text then goes only to that server.
-- **Nothing is sent** when you only open the panel, and nothing is sent in the background.
+- **Update checks.** If you turn on weekly update checks, or choose Check for Updates… in the menu, Tajpo asks GitHub's public API for the latest release number of Tajpo. The request includes nothing about you or your text; GitHub sees your IP address, as with any web request.
+- **Nothing else is sent.** Opening the panel sends nothing, and nothing is sent in the background.
 
 ## What Tajpo stores on your Mac
 
