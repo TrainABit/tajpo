@@ -42,6 +42,9 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
         place(panel, size: panel.frame.size)
         panel.orderFrontRegardless()
         panel.makeKey()
+        // Start with nothing focused: the ⌘ shortcuts work anyway, and a focus
+        // ring on the instruction field would be the loudest thing on screen.
+        panel.makeFirstResponder(nil)
         installClickMonitor()
     }
 
