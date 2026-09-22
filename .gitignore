@@ -1,7 +1,11 @@
 .DS_Store
 .build/
 .swiftpm/
+build/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+*.app
+*.dmg
+*.xcarchive
 .env
