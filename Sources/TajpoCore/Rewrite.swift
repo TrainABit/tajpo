@@ -1,7 +1,7 @@
 import Foundation
 
 public enum RewriteAction: String, CaseIterable, Identifiable, Codable, Sendable {
-    case correct, improve, rewrite, shorten, changeTone
+    case correct, improve, rewrite, shorten, changeTone, custom
 
     public var id: String { rawValue }
 
@@ -12,10 +12,14 @@ public enum RewriteAction: String, CaseIterable, Identifiable, Codable, Sendable
         case .rewrite: "Rewrite"
         case .shorten: "Shorten"
         case .changeTone: "Change Tone"
+        case .custom: "Custom"
         }
     }
 
-    /// Number used for the ⌘1–⌘5 shortcuts in the panel.
+    /// The fixed actions shown as buttons; `custom` uses a typed instruction.
+    public static var buttons: [RewriteAction] { [.correct, .improve, .rewrite, .shorten, .changeTone] }
+
+    /// Number used for the ⌘1–⌘6 shortcuts in the panel.
     public var shortcutNumber: Int {
         (Self.allCases.firstIndex(of: self) ?? 0) + 1
     }

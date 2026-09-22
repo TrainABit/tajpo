@@ -14,6 +14,10 @@ final class RewriteSession: ObservableObject {
     @Published private(set) var capture: TextCapture?
     @Published private(set) var action: RewriteAction?
     @Published var tone: RewriteTone = .professional
+    /// Text of the "Tell Tajpo what to do" field for the custom action.
+    @Published var instruction = ""
+    /// Set to move keyboard focus to the instruction field.
+    @Published var focusInstruction = false
     @Published private(set) var preview = ""
     /// Final replacement text. Only set for complete, usable results.
     @Published private(set) var result: String?
@@ -21,6 +25,8 @@ final class RewriteSession: ObservableObject {
     @Published private(set) var error: TajpoError?
     @Published private(set) var notice: String?
     @Published var isReplacing = false
+    /// A one-time feature tip shown under the result.
+    @Published var tip: String?
     @Published var showChanges = true
 
     func reset() {
@@ -33,6 +39,8 @@ final class RewriteSession: ObservableObject {
         error = nil
         notice = nil
         isReplacing = false
+        instruction = ""
+        tip = nil
     }
 
     func captured(_ capture: TextCapture) {

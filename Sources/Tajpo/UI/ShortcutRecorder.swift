@@ -4,6 +4,7 @@ import TajpoCore
 
 /// Click to record a shortcut, then press it. ⎋ cancels, ⌫ clears.
 struct ShortcutRecorder: NSViewRepresentable {
+    let label: String
     let shortcut: GlobalShortcut?
     let onRecordingChanged: (Bool) -> Void
     let onRecord: (GlobalShortcut?) -> Void
@@ -17,6 +18,8 @@ struct ShortcutRecorder: NSViewRepresentable {
 
     func updateNSView(_ button: RecorderButton, context: Context) {
         button.shortcut = shortcut
+        button.setAccessibilityLabel("\(label) shortcut")
+        button.setAccessibilityValue(shortcut?.displayString ?? "None")
         button.onRecordingChanged = onRecordingChanged
         button.onRecord = onRecord
         button.refreshTitle()
@@ -38,7 +41,6 @@ final class RecorderButton: NSButton {
         super.init(frame: frame)
         target = self
         action = #selector(startRecording)
-        setAccessibilityLabel("Shortcut")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -48,6 +50,16 @@ final class RecorderButton: NSButton {
 
     func refreshTitle() {
         title = isRecording ? "Type shortcut…" : (shortcut?.displayString ?? "Click to record")
+        bezelColor = isRecording ? .controlAccentColor : nil
+    }
+
+    /// Shows the modifiers being held while recording, e.g. "⌃⌥…".
+    override func flagsChanged(with event: NSEvent) {
+        guard isRecording else { return super.flagsChanged(with: event) }
+        let flags = event.modifierFlags
+        let held = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
+            + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
+        title = held.isEmpty ? "Type shortcut…" : held + "…"
     }
 
     @objc private func startRecording() {
@@ -114,6 +126,7 @@ struct ShortcutSetting: View {
                 Text(action.title)
                 Spacer()
                 ShortcutRecorder(
+                    label: action.title,
                     shortcut: settings.shortcut(for: action),
                     onRecordingChanged: { recording in
                         recording ? model.hotkeys.suspend() : model.hotkeys.resume()
@@ -128,13 +141,23 @@ struct ShortcutSetting: View {
                     }
                 )
                 .frame(width: 150)
-                Button("Default") {
+                if settings.shortcut(for: action) != nil {
+                    Button {
+                        message = model.applyShortcut(nil, for: action)?.localizedDescription ?? "Shortcut turned off."
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Turn this shortcut off")
+                    .accessibilityLabel("Clear \(action.title) shortcut")
+                }
+                Button("Reset") {
                     let fallback = action == .rewrite ? GlobalShortcut.defaultRewrite : .defaultRepeat
                     message = model.applyShortcut(fallback, for: action)?.localizedDescription ?? "Restored \(fallback.displayString)."
                 }
             }
             if let error = model.hotkeyErrors[action] {
-                Text(error.localizedDescription).font(.caption).foregroundStyle(.red)
+                ErrorLabel(text: error.localizedDescription)
             } else if let message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }

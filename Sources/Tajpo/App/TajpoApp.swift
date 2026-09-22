@@ -11,10 +11,20 @@ struct TajpoApp: App {
         MenuBarExtra {
             MenuContent(model: model, presets: model.presets, settings: model.settings)
         } label: {
-            Image(systemName: model.isWorking ? "sparkles" : (model.needsSetup ? "exclamationmark.triangle" : "character.cursor.ibeam"))
-                .accessibilityLabel("Tajpo")
+            Label(menuBarTitle, systemImage: menuBarSymbol)
         }
         .menuBarExtraStyle(.menu)
+    }
+
+    private var menuBarSymbol: String {
+        if model.isWorking || model.celebrating { return "sparkles" }
+        return model.needsSetup ? "exclamationmark.circle" : "character.cursor.ibeam"
+    }
+
+    /// Menu bar extras show only the icon; the title is what VoiceOver reads.
+    private var menuBarTitle: String {
+        if model.isWorking { return "Tajpo, working" }
+        return model.needsSetup ? "Tajpo, needs setup" : "Tajpo"
     }
 }
 
@@ -25,7 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
         DispatchQueue.main.async {
+            AppLocation.offerMoveIfNeeded()
             EditMenu.installIfMissing()
+            EditMenu.installWindowMenuIfMissing()
             AppModel.shared.start()
         }
     }
@@ -38,47 +50,48 @@ struct MenuContent: View {
     @ObservedObject var settings: AppSettings
 
     var body: some View {
-        Text(model.status)
-
-        if !model.accessibilityTrusted {
-            Button("⚠︎ Allow Accessibility Access…") {
-                model.requestAccessibility()
-                model.openAccessibilitySettings()
-            }
-        }
         if model.needsAPIKey {
-            Button("⚠︎ Add Your OpenAI API Key…") { model.showSettings(tab: .ai) }
+            Button("Finish Setup: Add Your OpenAI Key…") { model.showOnboarding(at: OnboardingStep.connect.rawValue) }
+        }
+        if !model.accessibilityTrusted {
+            Button("Finish Setup: Allow Tajpo in Other Apps…") { model.showOnboarding(at: OnboardingStep.everywhere.rawValue) }
         }
         ForEach(HotkeyAction.allCases.filter { model.hotkeyErrors[$0] != nil }) { action in
-            Button("⚠︎ Shortcut for “\(action.title)” isn't working…") { model.showSettings(tab: .general) }
+            Button("Fix the Shortcut for “\(action.title)”…") { model.showSettings(tab: .general) }
         }
         if model.secureInputActive {
             Text("Shortcuts paused: another app has secure input on")
         }
+        if let shortcut = settings.rewriteShortcut {
+            Text("Select text, then press \(shortcut.displayString)")
+        }
+        if model.status != "Ready" {
+            Text(String(model.status.prefix(60)))
+        }
 
         Divider()
 
-        Button(title("Rewrite Selection", settings.rewriteShortcut)) { model.openPanel() }
-        Button(title(model.lastAction.map { "Repeat \($0.title)" } ?? "Repeat Last Action", settings.repeatShortcut)) {
-            model.repeatLastAction()
-        }
-        .disabled(model.lastAction == nil)
+        Button("Rewrite Selection") { model.openPanel() }
+            .keyboardShortcut(settings.rewriteShortcut?.menuShortcut)
+        Button(model.lastActionTitle.map { "Repeat \($0)" } ?? "Repeat Last Action") { model.repeatLastAction() }
+            .keyboardShortcut(settings.repeatShortcut?.menuShortcut)
+            .disabled(model.lastAction == nil)
 
         Picker("Style Preset", selection: Binding(get: { presets.selectedID }, set: { presets.select($0) })) {
             Text("None").tag(UUID?.none)
             ForEach(presets.presets) { Text($0.name).tag(Optional($0.id)) }
         }
 
+        if settings.usesThisWeek > 0 {
+            Text("\(settings.usesThisWeek) \(settings.usesThisWeek == 1 ? "edit" : "edits") this week")
+        }
+
         Divider()
 
-        Toggle("Launch at Login", isOn: Binding(
-            get: { model.launchAtLoginEnabled },
-            set: { _ = model.setLaunchAtLogin($0) }
-        ))
-        .disabled(!LaunchAtLogin.isAvailable)
-        Button("Setup Guide…") { model.showOnboarding() }
         Button("Settings…") { model.showSettings() }
             .keyboardShortcut(",")
+        Button("Setup Guide…") { model.showOnboarding() }
+        Button("Report a Problem…") { model.reportProblem() }
         Button("About Tajpo") { model.showAbout() }
 
         Divider()
@@ -86,9 +99,20 @@ struct MenuContent: View {
         Button("Quit Tajpo") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
+}
 
-    private func title(_ text: String, _ shortcut: GlobalShortcut?) -> String {
-        shortcut.map { "\(text)   \($0.displayString)" } ?? text
+extension GlobalShortcut {
+    /// The same shortcut as a menu key equivalent (letters and digits only),
+    /// so the menu shows it right-aligned like any other shortcut.
+    var menuShortcut: SwiftUI.KeyboardShortcut? {
+        let name = KeyCode.name(for: keyCode)
+        guard name.count == 1, let character = name.lowercased().first, character.isLetter || character.isNumber else { return nil }
+        var modifiers: EventModifiers = []
+        if hasCommand { modifiers.insert(.command) }
+        if hasControl { modifiers.insert(.control) }
+        if hasOption { modifiers.insert(.option) }
+        if hasShift { modifiers.insert(.shift) }
+        return SwiftUI.KeyboardShortcut(KeyEquivalent(character), modifiers: modifiers)
     }
 }
 
@@ -113,6 +137,23 @@ enum EditMenu {
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         item.submenu = edit
+        mainMenu.addItem(item)
+        NSApp.mainMenu = mainMenu
+    }
+
+    /// ⌘W / ⌘M for Settings and the setup guide.
+    @MainActor
+    static func installWindowMenuIfMissing() {
+        let mainMenu = NSApp.mainMenu ?? NSMenu()
+        let hasClose = mainMenu.items.contains { item in
+            item.submenu?.items.contains { $0.action == #selector(NSWindow.performClose(_:)) } ?? false
+        }
+        guard !hasClose else { return }
+        let window = NSMenu(title: "Window")
+        window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let item = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        item.submenu = window
         mainMenu.addItem(item)
         NSApp.mainMenu = mainMenu
     }

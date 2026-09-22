@@ -8,6 +8,11 @@ public enum ModelCatalog {
 
     public static let defaultBaseURL = URL(string: "https://api.openai.com/v1")!
 
+    /// Cost reassurance shown during setup. Based on gpt-4.1-mini list prices
+    /// (~$0.40 / $1.60 per million input/output tokens, ~400 tokens per edit).
+    /// Re-check against OpenAI's pricing page when `defaultModel` changes.
+    public static let costHint = "A typical edit costs well under a tenth of a cent with the default model, so $5 of credit covers thousands of edits."
+
     /// Reasoning models (o-series, GPT-5 family except the chat variants) only
     /// accept the default temperature, so Tajpo must not send one.
     public static func isReasoningModel(_ model: String) -> Bool {

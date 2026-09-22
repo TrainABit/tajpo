@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in Tajpo doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead? Please don't paste private text.
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Which app were you writing in?
+      placeholder: e.g. Slack, Safari (Gmail), TextEdit
+  - type: input
+    id: versions
+    attributes:
+      label: Tajpo version, macOS version, Mac type
+      description: Tajpo's menu ▸ Report a Problem fills this in for you.
+      placeholder: Tajpo 0.3.0 (212) · macOS 15.6 · Apple Silicon
+  - type: input
+    id: layout
+    attributes:
+      label: Keyboard layout
+      placeholder: e.g. U.S., German, Dvorak
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash report (if Tajpo crashed)
+      description: Attach the newest Tajpo-*.ips file from ~/Library/Logs/DiagnosticReports.

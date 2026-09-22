@@ -38,23 +38,6 @@ class HostingWindowController: NSObject, NSWindowDelegate {
 }
 
 @MainActor
-final class SettingsWindowController: HostingWindowController {
-    private unowned let model: AppModel
-    private let navigation = SettingsNavigation()
-
-    init(model: AppModel) {
-        self.model = model
-    }
-
-    func show(tab: SettingsTab) {
-        navigation.tab = tab
-        present(title: "Tajpo Settings", size: NSSize(width: 640, height: 520), resizable: true) {
-            AnyView(SettingsView(model: model, navigation: navigation))
-        }
-    }
-}
-
-@MainActor
 final class OnboardingWindowController: HostingWindowController {
     private unowned let model: AppModel
 

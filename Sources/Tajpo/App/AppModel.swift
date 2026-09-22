@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Carbon
 import Combine
 import TajpoCore
@@ -8,7 +9,7 @@ import TajpoCore
 @MainActor
 protocol LocalTextProvider: AnyObject {
     var practiceText: String { get }
-    func replacePracticeText(with text: String)
+    func replacePracticeText(with text: String, diff: [DiffSegment]?)
 }
 
 @MainActor
@@ -23,7 +24,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWorking = false
     @Published private(set) var status = "Ready"
     @Published private(set) var lastAction: RewriteAction?
+    private var lastInstruction: String?
     @Published private(set) var launchAtLoginEnabled = false
+    /// Briefly true after setup so the menu bar icon draws attention to itself.
+    @Published private(set) var celebrating = false
 
     let settings: AppSettings
     let presets: PresetStore
@@ -103,6 +107,12 @@ final class AppModel: ObservableObject {
 
     // MARK: Hotkeys
 
+    var lastActionTitle: String? {
+        guard let lastAction else { return nil }
+        if lastAction == .custom, let lastInstruction { return "“\(lastInstruction)”" }
+        return lastAction.title
+    }
+
     private func handleHotkey(_ action: HotkeyAction) {
         if let probe = shortcutProbe {
             probe()
@@ -133,7 +143,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Panel flow
 
-    func openPanel(thenRun action: RewriteAction? = nil) {
+    func openPanel(thenRun action: RewriteAction? = nil, instruction: String? = nil) {
         guard !isCapturing, !session.isReplacing else { return }
         cancelRun()
         session.reset()
@@ -150,8 +160,10 @@ final class AppModel: ObservableObject {
                     capture = try await selection.capture()
                 }
                 session.captured(capture)
-                panel.show(model: self, near: capture.bounds)
+                session.tip = nextTip()
+                panel.show(model: self, near: capture.bounds, sourceName: capture.sourceApp?.localizedName)
                 if let action {
+                    if let instruction { session.instruction = instruction }
                     run(action)
                 } else if let problem = configurationProblem() {
                     session.fail(problem)
@@ -165,6 +177,11 @@ final class AppModel: ObservableObject {
 
     func run(_ action: RewriteAction) {
         guard let capture = session.capture, !session.isReplacing else { return }
+        let instruction = session.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action == .custom && instruction.isEmpty {
+            session.focusInstruction = true
+            return
+        }
         if let problem = configurationProblem() {
             session.fail(problem)
             return
@@ -180,7 +197,8 @@ final class AppModel: ObservableObject {
         let id = UUID()
         runID = id
         let tone = session.tone
-        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model)
+        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model,
+                                            instruction: action == .custom ? instruction : nil)
         let tag = PromptBuilder.tagName(for: capture.text)
         let client = makeClient(try? keyStore.load(), settings.baseURL, settings.projectID)
         session.begin(action)
@@ -196,6 +214,8 @@ final class AppModel: ObservableObject {
                 guard let self, self.runID == id else { return }
                 self.session.finish(OutputCleaner.finalize(output, original: capture.text, tag: tag))
                 self.lastAction = action
+                self.lastInstruction = action == .custom ? instruction : nil
+                if action == .custom { self.settings.rememberInstruction(instruction) }
                 self.settings.lastTone = tone
                 self.endRun(status: "Ready to replace")
             } catch {
@@ -207,7 +227,7 @@ final class AppModel: ObservableObject {
                     self.endRun(status: "Cancelled")
                 } else {
                     self.session.fail(mapped)
-                    self.endRun(status: mapped.localizedDescription)
+                    self.endRun(status: "Last request failed: \(InlineRewriteView.errorTitle(mapped).lowercased())")
                 }
             }
         }
@@ -233,13 +253,19 @@ final class AppModel: ObservableObject {
         Task {
             defer { session.isReplacing = false }
             if capture.method == .local {
-                localTextProvider?.replacePracticeText(with: text)
-                closePanel(status: "Replaced")
+                localTextProvider?.replacePracticeText(with: text, diff: session.diff)
+                await finishSuccessfully(notice: "Replaced", status: "Replaced")
                 return
             }
             do {
                 let outcome = try await selection.replace(with: text, capture: capture, hidePanel: { panel.hide() })
-                closePanel(status: outcome == .verified ? "Replaced" : "Pasted. Check the result")
+                if outcome == .verified {
+                    // Paste path hid the panel; only flash the confirmation when it's visible.
+                    await finishSuccessfully(notice: "Replaced", status: "Replaced")
+                } else {
+                    settings.recordUse()
+                    closePanel(status: "Pasted. Check the result")
+                }
             } catch {
                 panel.reshow()
                 session.report(Self.map(error))
@@ -247,11 +273,43 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func copyResult() {
+    func copyResult(closeAfter: Bool = false) {
         guard let text = session.copyableText else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        session.note("Copied to the clipboard")
+        if closeAfter {
+            Task { await finishSuccessfully(notice: "Copied. Paste it wherever you need it.", status: "Copied") }
+        } else {
+            settings.recordUse()
+            session.note("Copied to the clipboard")
+        }
+    }
+
+    /// Shows a short confirmation in the panel, then closes it.
+    private func finishSuccessfully(notice: String, status: String) async {
+        settings.recordUse()
+        session.note(notice)
+        AccessibilityNotification.Announcement(notice).post()
+        try? await Task.sleep(for: .milliseconds(650))
+        closePanel(status: status)
+    }
+
+    /// One-time tips that teach features after the user has used the basics.
+    private func nextTip() -> String? {
+        let uses = settings.totalUses
+        if uses >= 3, !settings.hasShownTip("repeat"), let shortcut = settings.repeatShortcut {
+            settings.markTipShown("repeat")
+            return "Tip: \(shortcut.displayString) repeats your last action on new text."
+        }
+        if uses >= 6, !settings.hasShownTip("custom") {
+            settings.markTipShown("custom")
+            return "Tip: type your own instruction below, like “translate to Spanish”."
+        }
+        if uses >= 10, !settings.hasShownTip("presets"), presets.selected == nil {
+            settings.markTipShown("presets")
+            return "Tip: a style preset (e.g. “use British spelling”) applies your preferences every time."
+        }
+        return nil
     }
 
     func repeatLastAction() {
@@ -261,7 +319,7 @@ final class AppModel: ObservableObject {
             panel.show(model: self, near: nil)
             return
         }
-        openPanel(thenRun: lastAction)
+        openPanel(thenRun: lastAction, instruction: lastInstruction)
     }
 
     func closePanel(status: String? = nil) {
@@ -326,6 +384,29 @@ final class AppModel: ObservableObject {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
 
+    func reportProblem() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
+        #if arch(arm64)
+        let arch = "Apple Silicon"
+        #else
+        let arch = "Intel"
+        #endif
+        let body = """
+        **What happened?**
+
+
+        **Which app were you writing in?**
+
+
+        ---
+        Tajpo \(version) (\(build)) · \(ProcessInfo.processInfo.operatingSystemVersionString) · \(arch)
+        """
+        var components = URLComponents(string: "https://github.com/TrainABit/tajpo/issues/new")!
+        components.queryItems = [URLQueryItem(name: "body", value: body)]
+        if let url = components.url { NSWorkspace.shared.open(url) }
+    }
+
     func open(_ link: String) {
         if let url = URL(string: link) { NSWorkspace.shared.open(url) }
     }
@@ -334,8 +415,21 @@ final class AppModel: ObservableObject {
         settingsWindow.show(tab: tab)
     }
 
-    func showOnboarding() {
+    /// Opens the setup guide, optionally at a specific step (see `OnboardingStep`).
+    func showOnboarding(at step: Int? = nil) {
+        if let step {
+            UserDefaults.standard.set(step, forKey: OnboardingStep.storageKey)
+            onboardingWindow.close()
+        }
         onboardingWindow.show()
+    }
+
+    func celebrateMenuBarIcon() {
+        celebrating = true
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            celebrating = false
+        }
     }
 
     func completeOnboarding() {
@@ -349,15 +443,15 @@ final class AppModel: ObservableObject {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Tajpo",
             .applicationVersion: version,
-            .credits: NSAttributedString(string: "Select text anywhere, press a shortcut, and improve it. Your text goes only to the AI provider you configure.")
+            .credits: NSAttributedString(string: "Select text anywhere, press a shortcut, and improve it. Your text goes only to the AI provider you configure.\n\nSupport: github.com/TrainABit/tajpo/issues")
         ])
     }
 
     func setLaunchAtLogin(_ enabled: Bool) -> String? {
         do {
-            try LaunchAtLogin.setEnabled(enabled)
+            let message = try LaunchAtLogin.setEnabled(enabled)
             refreshStatus()
-            return nil
+            return message
         } catch {
             refreshStatus()
             return error.localizedDescription
