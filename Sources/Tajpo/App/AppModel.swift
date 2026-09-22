@@ -105,7 +105,7 @@ final class AppModel: ObservableObject {
         if login != launchAtLoginEnabled { launchAtLoginEnabled = login }
     }
 
-    var needsAPIKey: Bool { settings.usesOpenAI && apiKeyHint == nil }
+    var needsAPIKey: Bool { settings.usesOpenAI && apiKeyHint == nil && !DemoScene.simulatesReady }
 
     var needsSetup: Bool { !accessibilityTrusted || needsAPIKey || !hotkeyErrors.isEmpty }
 

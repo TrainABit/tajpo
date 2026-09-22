@@ -92,6 +92,9 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
+                StatusHeader(model: model)
+            }
+            Section {
                 ShortcutSetting(model: model, action: .rewrite)
                 ShortcutSetting(model: model, action: .repeatLast)
             } header: {
@@ -135,7 +138,44 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 490)
+        .frame(height: 570)
+    }
+}
+
+/// App icon, version, and whether Tajpo is ready, at the top of General.
+private struct StatusHeader: View {
+    @ObservedObject var model: AppModel
+
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development build"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Tajpo").font(.title3.bold())
+                Text("Version \(version)").font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if model.needsSetup {
+                Button { model.showOnboarding() } label: {
+                    Label("Finish Setup…", systemImage: "exclamationmark.circle.fill")
+                }
+                .tint(.orange)
+                .buttonStyle(.borderedProminent)
+            } else {
+                Label("Ready", systemImage: "checkmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.green.opacity(0.14)))
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -556,6 +596,6 @@ private struct PrivacySettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 490)
+        .frame(height: 570)
     }
 }

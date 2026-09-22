@@ -10,6 +10,7 @@ enum DemoScene: String, CaseIterable {
     case onboardingTryIt = "onboarding-tryit"
     case onboardingEverywhere = "onboarding-everywhere"
     case onboardingDone = "onboarding-done"
+    case onboardingReady = "onboarding-ready"
     case settingsGeneral = "settings-general"
     case settingsAI = "settings-ai"
     case settingsPresets = "settings-presets"
@@ -24,6 +25,11 @@ enum DemoScene: String, CaseIterable {
     /// Shows the "not allowed yet" state even on a Mac that granted Accessibility.
     static var simulatesNoAccess: Bool {
         UserDefaults.standard.bool(forKey: "TajpoDemoNoAccess")
+    }
+
+    /// Pretends a key is saved, to show the finished setup.
+    static var simulatesReady: Bool {
+        requested == .onboardingReady
     }
 
     static var requested: DemoScene? {
@@ -45,6 +51,7 @@ extension AppModel {
         case .onboardingTryIt: showOnboarding(at: OnboardingStep.tryIt.rawValue)
         case .onboardingEverywhere: showOnboarding(at: OnboardingStep.everywhere.rawValue)
         case .onboardingDone: showOnboarding(at: OnboardingStep.done.rawValue)
+        case .onboardingReady: showOnboarding(at: OnboardingStep.done.rawValue)
         case .settingsGeneral: showSettings(tab: .general)
         case .settingsAI: showSettings(tab: .ai)
         case .settingsPresets: showSettings(tab: .presets)

@@ -9,7 +9,7 @@ OUT="$ROOT/snapshots"
 mkdir -p "$OUT"
 
 SCENES=(
-  onboarding-welcome onboarding-connect onboarding-tryit onboarding-everywhere onboarding-done
+  onboarding-welcome onboarding-connect onboarding-tryit onboarding-everywhere onboarding-done onboarding-ready
   settings-general settings-ai settings-presets settings-privacy
   panel-ready panel-running panel-finished panel-copyonly panel-error panel-long
 )

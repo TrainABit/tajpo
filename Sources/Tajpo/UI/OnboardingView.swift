@@ -125,6 +125,11 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
+        .overlay {
+            if step == .done && missingItems.isEmpty && !reduceMotion {
+                Confetti().allowsHitTesting(false)
+            }
+        }
         .frame(minWidth: Self.size.width, maxWidth: .infinity, minHeight: Self.size.height, maxHeight: .infinity)
         .ignoresSafeArea()
         .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: step)
@@ -515,16 +520,22 @@ struct OnboardingView: View {
         let missing = missingItems
         return VStack(alignment: .leading, spacing: 14) {
             if missing.isEmpty {
-                StepHeader(symbol: "checkmark.seal.fill", tint: .green, title: "You're all set",
-                           subtitle: "Tajpo is ready in every app.")
-                HStack(spacing: 10) {
-                    Text("Select text anywhere, then press")
+                VStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 54))
+                        .foregroundStyle(.white, .green)
+                        .symbolEffect(.bounce, value: step)
+                    Text("You're all set")
+                        .font(.system(size: 30, weight: .bold))
+                    Text("Tajpo is ready in every app. Select text anywhere, then press")
+                        .foregroundStyle(.secondary)
                     KeyCaps(shortcut: settings.rewriteShortcut)
-                    Spacer()
                     Button("Try It in TextEdit") { openTextEdit() }
+                        .controlSize(.large)
+                        .padding(.top, 4)
                 }
-                .font(.title3)
-                .card()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
             } else {
                 StepHeader(symbol: "flag.checkered", tint: .orange, title: "Almost there",
                            subtitle: missing.count == 1
@@ -823,6 +834,63 @@ private struct StepHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// A short burst of confetti for finishing setup. Drawn with Canvas; no assets.
+private struct Confetti: View {
+    private struct Piece {
+        let x: Double, delay: Double, speed: Double, drift: Double, spin: Double, size: Double
+        let color: Color
+    }
+
+    @State private var start = Date()
+    private let pieces: [Piece] = (0..<90).map { index in
+        var generator = SeededGenerator(seed: UInt64(index) &* 2_654_435_761)
+        let colors: [Color] = [.blue, .purple, .pink, .orange, .green, .yellow]
+        return Piece(x: .random(in: 0...1, using: &generator),
+                     delay: .random(in: 0...0.6, using: &generator),
+                     speed: .random(in: 260...460, using: &generator),
+                     drift: .random(in: -60...60, using: &generator),
+                     spin: .random(in: 2...8, using: &generator),
+                     size: .random(in: 5...9, using: &generator),
+                     color: colors[index % colors.count])
+    }
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let elapsed = timeline.date.timeIntervalSince(start)
+            Canvas { context, size in
+                guard elapsed < 3.5 else { return }
+                for piece in pieces {
+                    let t = elapsed - piece.delay
+                    guard t > 0 else { continue }
+                    let y = -20 + piece.speed * t + 40 * t * t
+                    guard y < size.height + 20 else { continue }
+                    let x = piece.x * size.width + piece.drift * sin(t * 2)
+                    var copy = context
+                    copy.opacity = max(0, 1 - t / 3)
+                    copy.translateBy(x: x, y: y)
+                    copy.rotate(by: .radians(t * piece.spin))
+                    copy.fill(Path(CGRect(x: -piece.size / 2, y: -piece.size / 4, width: piece.size, height: piece.size / 2)),
+                              with: .color(piece.color))
+                }
+            }
+        }
+        .onAppear { start = Date() }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Deterministic random numbers, so the confetti looks the same each time.
+private struct SeededGenerator: RandomNumberGenerator {
+    var state: UInt64
+    init(seed: UInt64) { state = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed }
+    mutating func next() -> UInt64 {
+        state ^= state << 13
+        state ^= state >> 7
+        state ^= state << 17
+        return state
     }
 }
 
