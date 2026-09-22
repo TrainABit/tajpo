@@ -125,7 +125,7 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(minWidth: Self.size.width, maxWidth: .infinity, minHeight: Self.size.height, maxHeight: .infinity)
         .ignoresSafeArea()
         .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: step)
         .onAppear {
@@ -227,7 +227,7 @@ struct OnboardingView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!reachable)
+        .allowsHitTesting(reachable)
         .accessibilityLabel("\(item.label)\(done ? ", done" : "")\(current ? ", current step" : "")")
     }
 

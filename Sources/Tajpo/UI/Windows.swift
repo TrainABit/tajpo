@@ -21,7 +21,13 @@ class HostingWindowController: NSObject, NSWindowDelegate {
                 window.isMovableByWindowBackground = true
             }
             window.delegate = self
-            window.contentView = NSHostingView(rootView: content())
+            let hosting = NSHostingView(rootView: content())
+            if fullSizeContent {
+                // The content fills the whole window, title bar included; the
+                // hosting view would otherwise add the title bar's height again.
+                hosting.sizingOptions = []
+            }
+            window.contentView = hosting
             window.center()
             self.window = window
         }
