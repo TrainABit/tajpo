@@ -37,7 +37,7 @@ final class AppModel: ObservableObject {
     private let selection: TextSelectionService
     private let keyStore: APIKeyStoring
     private let makeClient: (String?, URL, String) -> LLMClient
-    private let panel = InlinePanelController()
+    let panel = InlinePanelController()
     private lazy var settingsWindow = SettingsWindowController(model: self)
     private lazy var onboardingWindow = OnboardingWindowController(model: self)
 
@@ -85,7 +85,9 @@ final class AppModel: ObservableObject {
         }
         panel.onClose = { [weak self] in self?.panelClosed() }
         panel.onOutsideClick = { [weak self] in self?.outsideClick() }
-        if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
+        if let scene = DemoScene.requested {
+            showDemo(scene)
+        } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
             showOnboarding()
         }
     }
