@@ -175,7 +175,9 @@ struct OnboardingView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 40, height: 40)
-                    .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+                    // The icon shares the sidebar's colors; a light rim keeps it from blending in.
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.55), lineWidth: 1).padding(4))
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Tajpo").font(.title2.bold())
                     Text("Setup").font(.callout).opacity(0.75)
