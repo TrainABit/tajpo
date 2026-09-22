@@ -108,12 +108,16 @@ struct OnboardingView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                ScrollView {
-                    content
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(.bottom, 8)
+                GeometryReader { proxy in
+                    ScrollView {
+                        content
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.bottom, 8)
+                            // Short steps sit in the middle instead of leaving a gap above the buttons.
+                            .frame(minHeight: proxy.size.height, alignment: centersContent ? .center : .top)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
-                .scrollBounceBehavior(.basedOnSize)
                 .scrollIndicators(.automatic)
                 .id(step)
                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .opacity))
@@ -132,6 +136,7 @@ struct OnboardingView: View {
         }
         .frame(minWidth: Self.size.width, maxWidth: .infinity, minHeight: Self.size.height, maxHeight: .infinity)
         .ignoresSafeArea()
+        .tint(Brand.accent)
         .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: step)
         .onAppear {
             let restored = OnboardingStep(rawValue: savedStep) ?? .welcome
@@ -158,11 +163,11 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: Sidebar
+    private var centersContent: Bool {
+        step == .welcome || step == .done
+    }
 
-    private static let sidebarGradient = LinearGradient(
-        colors: [Color(red: 0.22, green: 0.36, blue: 0.96), Color(red: 0.47, green: 0.27, blue: 0.88)],
-        startPoint: .topLeading, endPoint: .bottomTrailing)
+    // MARK: Sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -184,7 +189,8 @@ struct OnboardingView: View {
                 }
             }
             Spacer()
-            Label(step == .done ? "Nearly done" : "About 3 minutes", systemImage: "clock")
+            Label(step == .done ? (missingItems.isEmpty ? "All set" : "Almost there") : "About 3 minutes",
+                  systemImage: step == .done && missingItems.isEmpty ? "checkmark.circle" : "clock")
                 .font(.callout)
                 .opacity(0.8)
         }
@@ -193,7 +199,7 @@ struct OnboardingView: View {
         .frame(width: 236, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.white)
-        .background(Self.sidebarGradient)
+        .background(Brand.gradient)
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Setup step \(step.rawValue + 1) of \(OnboardingStep.allCases.count), \(step.label)")
@@ -209,16 +215,16 @@ struct OnboardingView: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(current ? Color.white : Color.white.opacity(done ? 0.28 : 0.12))
+                        .fill(current ? Color.white : Color.white.opacity(done ? 0.3 : 0.14))
                     if done {
-                        Image(systemName: "checkmark").font(.caption.weight(.bold))
+                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
                     } else {
                         Image(systemName: item.symbol)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(current ? Color(red: 0.3, green: 0.3, blue: 0.9) : .white)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(current ? Brand.indigo : .white)
                     }
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.label).fontWeight(current ? .semibold : .medium)
                     Text(item.detail).font(.caption).opacity(0.7)
@@ -228,7 +234,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(current ? 0.16 : 0)))
-            .opacity(current || reachable ? 1 : 0.6)
+            .opacity(current || reachable ? 1 : 0.72)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -271,20 +277,20 @@ struct OnboardingView: View {
             }
             DemoAnimation()
             VStack(alignment: .leading, spacing: 12) {
-                feature("cursorarrow.rays", .blue, "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
-                feature("eye", .purple, "You approve every change", "See the result first. Nothing changes until you press Replace.")
-                feature("lock.shield", .green, "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
+                feature("macwindow.on.rectangle", "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
+                feature("eye", "You approve every change", "See the result first. Nothing changes until you press Replace.")
+                feature("lock.shield", "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
             }
         }
     }
 
-    private func feature(_ symbol: String, _ tint: Color, _ title: String, _ text: String) -> some View {
+    private func feature(_ symbol: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(tint)
+                .foregroundStyle(Brand.accent)
                 .frame(width: 32, height: 32)
-                .background(RoundedRectangle(cornerRadius: 8).fill(tint.opacity(0.14)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Brand.accent.opacity(0.12)))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).fontWeight(.semibold)
                 Text(text).foregroundStyle(.secondary)
@@ -296,7 +302,7 @@ struct OnboardingView: View {
     private var connect: some View {
         VStack(alignment: .leading, spacing: 14) {
             if settings.usesOpenAI {
-                StepHeader(symbol: "key.fill", tint: .blue, title: "Connect your OpenAI account",
+                StepHeader(symbol: "key.fill", tint: Brand.accent, title: "Connect your OpenAI account",
                            subtitle: "Tajpo runs on your own API key. Your text goes straight from your Mac to OpenAI, never to us.")
                 if let hint = model.apiKeyHint, keyField.isEmpty, keyStatus == .idle || keyStatus == .connected {
                     Label("Connected · \(hint)", systemImage: "checkmark.seal.fill")
@@ -344,7 +350,7 @@ struct OnboardingView: View {
                 }
                 .font(.callout)
             } else {
-                StepHeader(symbol: "server.rack", tint: .blue, title: "Connect your AI server",
+                StepHeader(symbol: "server.rack", tint: Brand.accent, title: "Connect your AI server",
                            subtitle: "Tajpo is set to use \(settings.baseURL.absoluteString). Your text goes only to that server.")
                 keyStatusView
                 HStack {
@@ -398,7 +404,7 @@ struct OnboardingView: View {
 
     private var tryIt: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StepHeader(symbol: "wand.and.stars", tint: .purple, title: "Try it",
+            StepHeader(symbol: "wand.and.stars", tint: Brand.accent, title: "Try it",
                        subtitle: "Practice here first. This box works without any permission.")
             if model.needsAPIKey {
                 HStack {
@@ -463,7 +469,7 @@ struct OnboardingView: View {
 
     private var everywhere: some View {
         VStack(alignment: .leading, spacing: 12) {
-            StepHeader(symbol: "macwindow.on.rectangle", tint: .green, title: "Use Tajpo in every app",
+            StepHeader(symbol: "macwindow.on.rectangle", tint: Brand.accent, title: "Use Tajpo in every app",
                        subtitle: "To read the text you select in Mail, Notes, Slack, and other apps, and to put the improved version back, macOS needs you to turn on Accessibility for Tajpo.")
             HStack(alignment: .top, spacing: 16) {
                 promiseColumn("Tajpo does", symbol: "checkmark", color: .green, items: [
@@ -535,9 +541,9 @@ struct OnboardingView: View {
                         .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             } else {
-                StepHeader(symbol: "flag.checkered", tint: .orange, title: "Almost there",
+                StepHeader(symbol: "flag.checkered", tint: Brand.accent, title: "Almost there",
                            subtitle: missing.count == 1
                                ? "One thing is still missing. You can finish it now or later from the menu bar."
                                : "A few things are still missing. You can finish them now or later from the menu bar.")
@@ -969,11 +975,12 @@ struct KeyCaps: View {
     }
 }
 
-/// A looping, scripted demo of the workflow (no network, no key needed).
+/// A looping example of the workflow: a sentence with mistakes, then the
+/// corrected version with the changes marked (no network, no key needed).
 private struct DemoAnimation: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var frame = 0
-    private let timer = Timer.publish(every: 1.8, on: .main, in: .common).autoconnect()
+    @State private var fixed = false
+    private let timer = Timer.publish(every: 2.4, on: .main, in: .common).autoconnect()
 
     private static let before = "Their going to the libary tomorow."
     private static let diff: [DiffSegment] = [
@@ -983,35 +990,51 @@ private struct DemoAnimation: View {
     ]
 
     var body: some View {
-        let shown = reduceMotion ? 2 : frame
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Your text").font(.caption).foregroundStyle(.secondary)
-                Text(shown == 0 ? Self.before : "They're going to the library tomorrow.")
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(shown == 0 ? Color.accentColor.opacity(0.2) : Color.clear)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Tajpo").font(.caption).foregroundStyle(.secondary)
-                Group {
-                    if shown == 0 {
-                        Text("Press ⌃⌥T…").foregroundStyle(.secondary)
-                    } else {
-                        Text(InlineRewriteView.attributed(Self.diff))
+        let shown = reduceMotion || fixed
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(shown ? "After" : "Before")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(shown ? Brand.accent : .secondary)
+                    .contentTransition(.opacity)
+                Spacer()
+                if shown {
+                    Label("3 fixes", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Brand.accent)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                } else {
+                    HStack(spacing: 3) {
+                        ForEach(["⌃", "⌥", "T"], id: \.self) { key in
+                            Text(key)
+                                .font(.caption.monospaced().weight(.semibold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.5)))
+                        }
                     }
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
                 }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
             }
+            Group {
+                if shown {
+                    Text(InlineRewriteView.attributed(Self.diff))
+                } else {
+                    Text(Self.before)
+                        .underline(pattern: .dot, color: .red)
+                }
+            }
+            .font(.title3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .transition(.opacity)
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: frame)
-        .onReceive(timer) { _ in frame = (frame + 1) % 3 }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .textBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08)))
+        .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: fixed)
+        .onReceive(timer) { _ in fixed.toggle() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Example: “Their going to the libary tomorow” becomes “They're going to the library tomorrow.”")
     }

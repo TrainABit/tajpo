@@ -241,6 +241,7 @@ struct InlineRewriteView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea()
+        .tint(Brand.accent)
         .onChange(of: session.phase) { _, phase in announce(phase) }
     }
 

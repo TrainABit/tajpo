@@ -108,8 +108,10 @@ private struct GeneralSettings: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            Section("Accessibility") {
-                AccessibilityStatus(model: model)
+            if !model.accessibilityTrusted {
+                Section("Accessibility") {
+                    AccessibilityStatus(model: model)
+                }
             }
             Section {
                 Toggle("Launch Tajpo at login", isOn: Binding(
@@ -124,7 +126,6 @@ private struct GeneralSettings: View {
                     get: { updates.automatic },
                     set: { updates.automatic = $0 }
                 ))
-                Button("Show Setup Guide…") { model.showOnboarding() }
             } header: {
                 Text("Startup and updates")
             } footer: {
@@ -138,7 +139,7 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 570)
+        .frame(height: model.accessibilityTrusted ? 470 : 540)
     }
 }
 
@@ -167,6 +168,8 @@ private struct StatusHeader: View {
                 .tint(.orange)
                 .buttonStyle(.borderedProminent)
             } else {
+                Button("Setup Guide…") { model.showOnboarding() }
+                    .buttonStyle(.link)
                 Label("Ready", systemImage: "checkmark.circle.fill")
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.green)
@@ -596,6 +599,6 @@ private struct PrivacySettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 570)
+        .frame(height: 490)
     }
 }
