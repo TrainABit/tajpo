@@ -1,5 +1,5 @@
+import AppKit
 import Combine
-import Foundation
 import TajpoCore
 
 /// State of the inline panel for one captured selection. Kept separate from
@@ -28,8 +28,15 @@ final class RewriteSession: ObservableObject {
     /// A one-time feature tip shown under the result.
     @Published var tip: String?
     @Published var showChanges = true
+    /// The app the text came from, shown in the panel header.
+    @Published var sourceName: String?
+    @Published var sourceIcon: NSImage?
+
+    /// Increases on every reset, so async work can tell its session is gone.
+    private(set) var generation = 0
 
     func reset() {
+        generation += 1
         phase = .capturing
         capture = nil
         action = nil
@@ -45,6 +52,7 @@ final class RewriteSession: ObservableObject {
 
     func captured(_ capture: TextCapture) {
         self.capture = capture
+        error = nil
         phase = .ready
     }
 

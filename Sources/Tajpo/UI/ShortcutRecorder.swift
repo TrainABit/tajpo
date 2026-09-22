@@ -45,6 +45,30 @@ final class RecorderButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    private var resignObserver: NSObjectProtocol?
+
+    // Recording must never outlive the window's focus: shortcuts are suspended
+    // while recording, so an abandoned recorder would leave them all off.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if isRecording { finish(nil, record: false) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isRecording else { return }
+                self.finish(nil, record: false)
+            }
+        }
+    }
+
     override var acceptsFirstResponder: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: 150, height: super.intrinsicContentSize.height) }
 
@@ -129,10 +153,10 @@ struct ShortcutSetting: View {
                     label: action.title,
                     shortcut: settings.shortcut(for: action),
                     onRecordingChanged: { recording in
-                        recording ? model.hotkeys.suspend() : model.hotkeys.resume()
+                        recording ? model.hotkeys.suspend() : model.resumeHotkeys()
                     },
                     onRecord: { shortcut in
-                        model.hotkeys.resume()
+                        model.resumeHotkeys()
                         if let error = model.applyShortcut(shortcut, for: action) {
                             message = error.localizedDescription
                         } else {

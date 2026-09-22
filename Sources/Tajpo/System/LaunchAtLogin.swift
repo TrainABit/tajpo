@@ -53,15 +53,36 @@ enum AppLocation {
                 try fileManager.trashItem(at: destination, resultingItemURL: nil)
             }
             try fileManager.copyItem(at: Bundle.main.bundleURL, to: destination)
+            // A plain copy keeps the download quarantine flag, so Gatekeeper
+            // would translocate the copy again. The user explicitly chose to
+            // install it, as when dragging it into Applications in Finder.
+            removeQuarantine(at: destination)
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: destination, configuration: configuration) { _, _ in
-                DispatchQueue.main.async { NSApp.terminate(nil) }
+            NSWorkspace.shared.openApplication(at: destination, configuration: configuration) { _, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        let failure = NSAlert(error: error)
+                        failure.informativeText = "Tajpo was copied to Applications but couldn't be opened. Open it from there yourself."
+                        failure.runModal()
+                    } else {
+                        NSApp.terminate(nil)
+                    }
+                }
             }
         } catch {
             let failure = NSAlert(error: error)
             failure.informativeText = "Drag Tajpo from the disk image into your Applications folder, then open it from there."
             failure.runModal()
+        }
+    }
+
+    private static func removeQuarantine(at url: URL) {
+        let paths = [url.path] + (FileManager.default.enumerator(atPath: url.path)?.compactMap { item in
+            (item as? String).map { url.appendingPathComponent($0).path }
+        } ?? [])
+        for path in paths {
+            removexattr(path, "com.apple.quarantine", XATTR_NOFOLLOW)
         }
     }
 }

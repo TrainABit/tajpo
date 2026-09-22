@@ -108,8 +108,9 @@ final class TextSelectionService {
         if let element = capture.element {
             try rejectSecure(element)
             try ensureSelectionUnchanged(element, capture: capture)
+            let before = fieldValue(element)
             if AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success {
-                switch verify(element, inserted: text, original: capture.text) {
+                switch verify(element, inserted: text, original: capture.text, before: before) {
                 case .inserted: return .verified
                 case .unknown: return .unverified
                 case .unchanged: Log.selection.info("AX set reported success but changed nothing; pasting instead")
@@ -139,18 +140,21 @@ final class TextSelectionService {
         guard pasteboard.writeTransient(text) else { throw TajpoError.pasteboardUnavailable }
         let written = pasteboard.changeCount
 
+        let valueBeforePaste = capture.element.flatMap(fieldValue)
         await Keyboard.waitForModifierRelease()
         Keyboard.postCommandShortcut("v", fallback: CGKeyCode(kVK_ANSI_V))
 
         var outcome = ReplaceOutcome.unverified
         if let element = capture.element {
+            // Never restore sooner than this: the app may read the pasteboard late.
+            try? await Task.sleep(for: .milliseconds(300))
             let deadline = ContinuousClock.now + .milliseconds(1500)
             while ContinuousClock.now < deadline {
-                try? await Task.sleep(for: .milliseconds(50))
-                if case .inserted = verify(element, inserted: text, original: capture.text) {
+                if case .inserted = verify(element, inserted: text, original: capture.text, before: valueBeforePaste) {
                     outcome = .verified
                     break
                 }
+                try? await Task.sleep(for: .milliseconds(50))
             }
         } else {
             // No way to observe the paste; give slow apps time before restoring.
@@ -179,14 +183,18 @@ final class TextSelectionService {
             try? await Task.sleep(for: .milliseconds(20))
         }
         var text: String?
-        if pasteboard.changeCount != cleared {
+        let observed = pasteboard.changeCount
+        if observed != cleared {
             let types = pasteboard.types ?? []
             // A file copy (e.g. in Finder) also carries the file name as text.
             if !types.contains(.fileURL) {
                 text = pasteboard.string(forType: .string)
             }
         }
-        snapshot.restore(to: pasteboard)
+        // Restore unless someone else wrote to the pasteboard after the copy we saw.
+        if pasteboard.changeCount == observed {
+            snapshot.restore(to: pasteboard)
+        }
         guard let text else { throw TajpoError.noSelection }
         return text
     }
@@ -276,10 +284,19 @@ final class TextSelectionService {
 
     private enum Verification { case inserted, unchanged, unknown }
 
-    private func verify(_ element: AXUIElement, inserted text: String, original: String) -> Verification {
+    /// The field's full text, if readable and not huge.
+    private func fieldValue(_ element: AXUIElement) -> String? {
+        guard let value = stringAttribute(element, kAXValueAttribute), value.utf16.count < 500_000 else { return nil }
+        return Self.normalized(value)
+    }
+
+    /// `.inserted` only if the field's text changed and now contains the
+    /// replacement; a value that already contained it (e.g. a result equal to
+    /// the original) doesn't count.
+    private func verify(_ element: AXUIElement, inserted text: String, original: String, before: String?) -> Verification {
         let needle = Self.normalized(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let value = stringAttribute(element, kAXValueAttribute), value.utf16.count < 500_000 {
-            if Self.normalized(value).contains(needle) { return .inserted }
+        if let value = fieldValue(element), value != before, value.contains(needle) {
+            return .inserted
         }
         // Nothing happened if the original is still what's selected.
         if Self.normalized(selectedText(of: element)) == Self.normalized(original) { return .unchanged }

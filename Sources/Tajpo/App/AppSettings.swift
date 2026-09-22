@@ -117,7 +117,13 @@ final class AppSettings: ObservableObject {
 
     private static func loadShortcut(_ defaults: UserDefaults, key: String, fallback: GlobalShortcut?) -> GlobalShortcut? {
         guard let data = defaults.data(forKey: key) else { return fallback }
-        return (try? JSONDecoder().decode(GlobalShortcut?.self, from: data)) ?? fallback
+        // Decode explicitly: `try?` would flatten a stored `null` (disabled)
+        // into a failure and bring the default back.
+        do {
+            return try JSONDecoder().decode(GlobalShortcut?.self, from: data)
+        } catch {
+            return fallback
+        }
     }
 
     /// Keeps a shortcut chosen in an older version if it is still valid.

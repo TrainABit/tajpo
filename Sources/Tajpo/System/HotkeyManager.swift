@@ -58,16 +58,23 @@ final class HotkeyManager {
         references.removeAll()
     }
 
-    func resume() {
-        guard isSuspended else { return }
+    /// Re-registers suspended shortcuts. Returns the ones that failed; they
+    /// are dropped so the app can report them instead of looking active.
+    @discardableResult
+    func resume() -> [HotkeyAction: TajpoError] {
+        guard isSuspended else { return [:] }
         isSuspended = false
+        var failures: [HotkeyAction: TajpoError] = [:]
         for (action, shortcut) in shortcuts {
             do {
                 references[action] = try makeReference(shortcut, for: action)
             } catch {
                 Log.hotkey.error("Could not re-register \(action.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                shortcuts[action] = nil
+                failures[action] = error as? TajpoError ?? .hotkeyRejectedBySystem(shortcut.displayString)
             }
         }
+        return failures
     }
 
     private func makeReference(_ shortcut: GlobalShortcut, for action: HotkeyAction) throws -> EventHotKeyRef {

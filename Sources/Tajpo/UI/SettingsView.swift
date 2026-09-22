@@ -54,8 +54,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             case .presets: AnyView(PresetSettings(model: model, presets: model.presets))
             case .privacy: AnyView(PrivacySettings())
             }
-            let controller = NSHostingController(rootView: root.frame(width: 580))
+            let controller = NSHostingController(rootView: root.frame(width: 580).tint(Brand.accent))
             controller.sizingOptions = [.preferredContentSize]
+            controller.title = tab.title
             let item = NSTabViewItem(viewController: controller)
             item.label = tab.title
             item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
@@ -69,16 +70,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.tabs = tabs
         self.window = window
     }
+
+    func windowWillClose(_ notification: Notification) {
+        // Ends any shortcut recording (which resumes global shortcuts).
+        window?.makeFirstResponder(nil)
+    }
 }
 
 // MARK: - General
 
 private struct GeneralSettings: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var updates: UpdateChecker
     @State private var loginMessage: String?
+
+    init(model: AppModel) {
+        self.model = model
+        updates = model.updates
+    }
 
     var body: some View {
         Form {
+            Section {
+                StatusHeader(model: model)
+            }
             Section {
                 ShortcutSetting(model: model, action: .rewrite)
                 ShortcutSetting(model: model, action: .repeatLast)
@@ -93,8 +108,10 @@ private struct GeneralSettings: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            Section("Accessibility") {
-                AccessibilityStatus(model: model)
+            if !model.accessibilityTrusted {
+                Section("Accessibility") {
+                    AccessibilityStatus(model: model)
+                }
             }
             Section {
                 Toggle("Launch Tajpo at login", isOn: Binding(
@@ -105,10 +122,15 @@ private struct GeneralSettings: View {
                 if let loginMessage {
                     ErrorLabel(text: loginMessage)
                 }
-                Button("Show Setup Guide…") { model.showOnboarding() }
+                Toggle("Check for updates weekly", isOn: Binding(
+                    get: { updates.automatic },
+                    set: { updates.automatic = $0 }
+                ))
             } header: {
-                Text("Startup")
+                Text("Startup and updates")
             } footer: {
+                Text("The update check asks GitHub for the latest release number. It sends nothing about you or your text.")
+                    .foregroundStyle(.secondary)
                 if AppLocation.isTemporary {
                     Text("Move Tajpo to your Applications folder to start it at login.").foregroundStyle(.secondary)
                 } else if !LaunchAtLogin.isAvailable {
@@ -117,7 +139,46 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 430)
+        .frame(height: model.accessibilityTrusted ? 470 : 540)
+    }
+}
+
+/// App icon, version, and whether Tajpo is ready, at the top of General.
+private struct StatusHeader: View {
+    @ObservedObject var model: AppModel
+
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development build"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Tajpo").font(.title3.bold())
+                Text("Version \(version)").font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if model.needsSetup {
+                Button { model.showOnboarding() } label: {
+                    Label("Finish Setup…", systemImage: "exclamationmark.circle.fill")
+                }
+                .tint(.orange)
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button("Setup Guide…") { model.showOnboarding() }
+                    .buttonStyle(.link)
+                Label("Ready", systemImage: "checkmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.green.opacity(0.14)))
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -235,7 +296,8 @@ private struct AISettings: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    SecureField(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it", text: $keyField)
+                    SecureField("API key", text: $keyField,
+                                prompt: Text(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it"))
                         .onSubmit(saveKey)
                     Button("Save") { saveKey() }
                         .disabled(keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -270,7 +332,7 @@ private struct AISettings: View {
                 }
                 if modelChoice == Self.custom {
                     HStack {
-                        TextField("Model name", text: $customModel)
+                        TextField("Model name", text: $customModel, prompt: Text("e.g. llama3.1"))
                             .onSubmit { applyModel(customModel) }
                         Button("Use") { applyModel(customModel) }
                     }
@@ -281,14 +343,17 @@ private struct AISettings: View {
                         .foregroundStyle(.secondary)
                 }
                 if provider == .openAI {
-                    TextField("OpenAI project ID (optional)", text: $projectField)
+                    TextField("Project ID", text: $projectField, prompt: Text("Optional"))
                         .onSubmit { settings.setProjectID(projectField) }
                 }
                 MessageView(message: modelMessage)
             }
         }
         .formStyle(.grouped)
-        .frame(height: 560)
+        .frame(height: 470)
+        .onAppear(perform: syncFromSettings)
+        .onReceive(settings.$baseURL.dropFirst()) { _ in syncFromSettings() }
+        .onReceive(settings.$model.dropFirst()) { _ in syncFromSettings() }
         .confirmationDialog("Remove the saved API key?", isPresented: $confirmRemove) {
             Button("Remove Key", role: .destructive) {
                 do {
@@ -299,6 +364,16 @@ private struct AISettings: View {
                 }
             }
         }
+    }
+
+    /// Settings can change elsewhere (e.g. the setup guide's local-model button).
+    private func syncFromSettings() {
+        let current: Provider = settings.usesOpenAI ? .openAI : .custom
+        if provider != current { provider = current }
+        if !settings.usesOpenAI { baseURLField = settings.baseURL.absoluteString }
+        modelChoice = ModelCatalog.suggested.contains(settings.model) ? settings.model : Self.custom
+        customModel = settings.model
+        projectField = settings.projectID
     }
 
     private func saveKey() {
@@ -379,67 +454,36 @@ private struct PresetSettings: View {
     @State private var confirmRestore = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("A preset adds your own style instructions to Improve, Rewrite, Shorten, Change Tone, and custom instructions. Correct never uses presets, and a chosen tone wins over a preset.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .top, spacing: 12) {
-                VStack(spacing: 0) {
-                    List(selection: $editingID) {
-                        Section {
-                            HStack {
-                                Text("None")
-                                Spacer()
-                                if presets.selectedID == nil { activeBadge }
-                            }
-                            .contextMenu { Button("Use No Preset") { presets.select(nil) } }
+            HStack(alignment: .top, spacing: 14) {
+                presetList
+                    .frame(width: 210)
+                Group {
+                    if let editingID, let preset = presets.presets.first(where: { $0.id == editingID }) {
+                        PresetEditor(preset: preset, isActive: presets.selectedID == preset.id,
+                                     activate: { presets.select(preset.id) },
+                                     save: { presets.update($0) })
+                            .id(preset.id)
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "text.badge.star")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.tertiary)
+                            Text("Select a preset to edit it, or click + to create one.")
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                        ForEach(presets.presets) { preset in
-                            HStack {
-                                Text(preset.name)
-                                Spacer()
-                                if presets.selectedID == preset.id { activeBadge }
-                            }
-                            .tag(Optional(preset.id))
-                            .contextMenu {
-                                Button("Use This Preset") { presets.select(preset.id) }
-                                Button("Delete", role: .destructive) { delete(preset.id) }
-                            }
-                        }
-                    }
-                    .listStyle(.bordered(alternatesRowBackgrounds: false))
-                    HStack(spacing: 2) {
-                        Button {
-                            editingID = presets.add().id
-                        } label: { Image(systemName: "plus").frame(width: 20, height: 18) }
-                        .help("Add a preset")
-                        .accessibilityLabel("Add preset")
-                        Button {
-                            if let editingID { delete(editingID) }
-                        } label: { Image(systemName: "minus").frame(width: 20, height: 18) }
-                        .disabled(editingID == nil)
-                        .help("Delete the selected preset")
-                        .accessibilityLabel("Delete preset")
-                        Spacer()
-                        Button("Restore Built-ins…") { confirmRestore = true }
-                            .controlSize(.small)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.vertical, 4)
-                }
-                .frame(width: 200)
-
-                if let editingID, let preset = presets.presets.first(where: { $0.id == editingID }) {
-                    PresetEditor(preset: preset, isActive: presets.selectedID == preset.id,
-                                 activate: { presets.select(preset.id) },
-                                 save: { presets.update($0) })
-                        .id(preset.id)
-                } else {
-                    Text("Select a preset to edit it, or click + to create one.")
-                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
             }
         }
         .padding(20)
@@ -452,12 +496,77 @@ private struct PresetSettings: View {
         }
     }
 
-    private var activeBadge: some View {
-        Text("Active")
-            .font(.caption2.bold())
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(Color.accentColor.opacity(0.2)))
+    private var presetList: some View {
+        VStack(spacing: 0) {
+            List(selection: $editingID) {
+                row(title: "None", subtitle: "Just the action itself", active: presets.selectedID == nil)
+                    .contextMenu { Button("Use No Preset") { presets.select(nil) } }
+                ForEach(presets.presets) { preset in
+                    row(title: preset.name,
+                        subtitle: preset.instructions.split(separator: "\n").first.map(String.init) ?? "No instructions yet",
+                        active: presets.selectedID == preset.id)
+                        .tag(Optional(preset.id))
+                        .contextMenu {
+                            Button("Use This Preset") { presets.select(preset.id) }
+                            Button("Delete", role: .destructive) { delete(preset.id) }
+                        }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            Divider()
+            HStack(spacing: 4) {
+                Button {
+                    editingID = presets.add().id
+                } label: { Image(systemName: "plus").frame(width: 22, height: 20) }
+                .help("Add a preset")
+                .accessibilityLabel("Add preset")
+                Button {
+                    if let editingID { delete(editingID) }
+                } label: { Image(systemName: "minus").frame(width: 22, height: 20) }
+                .disabled(editingID == nil)
+                .help("Delete the selected preset")
+                .accessibilityLabel("Delete preset")
+                Spacer()
+                Menu {
+                    Button("Restore Built-in Presets…") { confirmRestore = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More")
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        }
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
+    }
+
+    private func row(title: String, subtitle: String, active: Bool) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).fontWeight(.medium).lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if active {
+                Text("Active")
+                    .font(.caption2.bold())
+                    .foregroundStyle(Brand.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Brand.accent.opacity(0.15)))
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func delete(_ id: UUID) {
@@ -473,26 +582,45 @@ private struct PresetEditor: View {
     let save: (WritingPreset) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             TextField("Name", text: $preset.name)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.title3.weight(.semibold))
+            Divider()
             Text("Instructions")
-                .font(.callout)
+                .font(.callout.weight(.medium))
                 .foregroundStyle(.secondary)
-            TextEditor(text: $preset.instructions)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(4)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
+            ZStack(alignment: .topLeading) {
+                if preset.instructions.isEmpty {
+                    Text("For example: “Use British spelling. Keep sentences under 20 words.”")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $preset.instructions)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(.vertical, 4)
+            }
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
             HStack {
-                Text("Example: “Use British spelling. Keep sentences under 20 words.”")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if isActive {
+                    Label("Tajpo is using this preset", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(Brand.accent)
+                } else {
+                    Text("Changes save automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button(isActive ? "Active" : "Use This Preset", action: activate)
-                    .disabled(isActive)
+                if !isActive {
+                    Button("Use This Preset", action: activate)
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
         .onChange(of: preset) { _, updated in
@@ -523,6 +651,6 @@ private struct PrivacySettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 420)
+        .frame(height: 490)
     }
 }

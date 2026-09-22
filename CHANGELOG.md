@@ -23,6 +23,15 @@
 - ⌘W and ⌘M work in Tajpo's windows.
 - Launch at login handles macOS asking for approval in System Settings.
 
+### Fixed
+- A shortcut you turned off came back after relaunch.
+- Replace could report success before the target app had applied the paste; it now checks that the text actually changed.
+- Leaving the shortcut recorder without pressing a key left Tajpo's shortcuts paused.
+- A panel closing after Replace could close a newer panel opened in the meantime.
+- "Move to Applications" copied the quarantine flag, so macOS moved the app to a temporary location again; Tajpo now quits only after the new copy opens.
+- The clipboard is restored only when nothing else changed it in the meantime.
+- Keychain read errors are shown instead of looking like a missing key.
+
 ## 0.2.0
 
 Complete overhaul after the full audit (see AUDIT.md): the app builds, replacements are safe, prompts are consistent, setup is rebuilt, and packaging exists.

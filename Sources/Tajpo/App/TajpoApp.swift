@@ -9,7 +9,7 @@ struct TajpoApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(model: model, presets: model.presets, settings: model.settings)
+            MenuContent(model: model, presets: model.presets, settings: model.settings, updates: model.updates)
         } label: {
             Label(menuBarTitle, systemImage: menuBarSymbol)
         }
@@ -48,13 +48,23 @@ struct MenuContent: View {
     @ObservedObject var model: AppModel
     @ObservedObject var presets: PresetStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var updates: UpdateChecker
 
     var body: some View {
+        if let release = updates.available {
+            Button { updates.openAvailable() } label: {
+                Label("Update Available: Tajpo \(release.version?.description ?? release.tag_name)…", systemImage: "arrow.down.circle")
+            }
+        }
         if model.needsAPIKey {
-            Button("Finish Setup: Add Your OpenAI Key…") { model.showOnboarding(at: OnboardingStep.connect.rawValue) }
+            Button { model.showOnboarding(at: OnboardingStep.connect.rawValue) } label: {
+                Label("Finish Setup: Add Your OpenAI Key…", systemImage: "key")
+            }
         }
         if !model.accessibilityTrusted {
-            Button("Finish Setup: Allow Tajpo in Other Apps…") { model.showOnboarding(at: OnboardingStep.everywhere.rawValue) }
+            Button { model.showOnboarding(at: OnboardingStep.everywhere.rawValue) } label: {
+                Label("Finish Setup: Allow Tajpo in Other Apps…", systemImage: "hand.raised")
+            }
         }
         ForEach(HotkeyAction.allCases.filter { model.hotkeyErrors[$0] != nil }) { action in
             Button("Fix the Shortcut for “\(action.title)”…") { model.showSettings(tab: .general) }
@@ -71,9 +81,11 @@ struct MenuContent: View {
 
         Divider()
 
-        Button("Rewrite Selection") { model.openPanel() }
+        Button { model.openPanel() } label: { Label("Rewrite Selection", systemImage: "wand.and.stars") }
             .keyboardShortcut(settings.rewriteShortcut?.menuShortcut)
-        Button(model.lastActionTitle.map { "Repeat \($0)" } ?? "Repeat Last Action") { model.repeatLastAction() }
+        Button { model.repeatLastAction() } label: {
+            Label(model.lastActionTitle.map { "Repeat \($0)" } ?? "Repeat Last Action", systemImage: "arrow.clockwise")
+        }
             .keyboardShortcut(settings.repeatShortcut?.menuShortcut)
             .disabled(model.lastAction == nil)
 
@@ -88,11 +100,15 @@ struct MenuContent: View {
 
         Divider()
 
-        Button("Settings…") { model.showSettings() }
+        Button { model.showSettings() } label: { Label("Settings…", systemImage: "gearshape") }
             .keyboardShortcut(",")
-        Button("Setup Guide…") { model.showOnboarding() }
-        Button("Report a Problem…") { model.reportProblem() }
-        Button("About Tajpo") { model.showAbout() }
+        Button { model.showOnboarding() } label: { Label("Setup Guide…", systemImage: "list.bullet.rectangle") }
+        Button { Task { await updates.check(userInitiated: true) } } label: {
+            Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+        }
+            .disabled(updates.isChecking)
+        Button { model.reportProblem() } label: { Label("Report a Problem…", systemImage: "exclamationmark.bubble") }
+        Button { model.showAbout() } label: { Label("About Tajpo", systemImage: "info.circle") }
 
         Divider()
 

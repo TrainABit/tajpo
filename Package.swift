@@ -12,6 +12,7 @@ var products: [Product] = []
 
 #if os(macOS)
 targets.append(.executableTarget(name: "Tajpo", dependencies: ["TajpoCore"]))
+targets.append(.testTarget(name: "TajpoAppTests", dependencies: ["Tajpo", "TajpoCore"]))
 products.append(.executable(name: "Tajpo", targets: ["Tajpo"]))
 #endif
 
