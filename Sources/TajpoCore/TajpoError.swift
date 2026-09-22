@@ -88,7 +88,7 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
         case .accessibilityPermissionRequired:
             "To work in other apps, Tajpo needs Accessibility access. It only reads the text you select, when you press the shortcut."
         case .noSelection:
-            "Nothing is selected. Highlight some text first, then press the shortcut again."
+            "Highlight some text first, then press the shortcut again."
         case .selectionInTajpo:
             "Select text in the app you're writing in, then press the shortcut."
         case .secureField:

@@ -292,6 +292,7 @@ struct OnboardingView: View {
             TextEditor(text: $practice.text)
                 .font(.body)
                 .frame(height: 80)
+                .scrollIndicators(.never)
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .background(Color(nsColor: .textBackgroundColor))
@@ -384,7 +385,7 @@ struct OnboardingView: View {
                 .font(.title3)
                 Button("Try It in TextEdit") { openTextEdit() }
             } else {
-                Text("A few things are still missing. You can finish them now or later from the menu bar.")
+                Text(missing.count == 1 ? "One thing is still missing. You can finish it now or later from the menu bar." : "A few things are still missing. You can finish them now or later from the menu bar.")
                     .foregroundStyle(.secondary)
                 ForEach(missing, id: \.title) { item in
                     HStack {
