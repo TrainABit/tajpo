@@ -50,18 +50,18 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            "Add your OpenAI API key in Settings."
+            "Tajpo needs your OpenAI API key before it can edit text."
         case .invalidAPIKeyFormat:
             "That doesn't look like an API key. Keys contain no spaces or line breaks; paste it again."
         case .invalidAPIKey(let detail):
-            "OpenAI rejected the API key. \(detail)"
+            "OpenAI didn't accept your API key. It may have been deleted or mistyped. (\(detail))"
         case .insufficientQuota:
-            "Your OpenAI account has no API credit. API usage is billed separately from ChatGPT; add credit in your OpenAI billing settings."
+            "Your OpenAI API credit has run out (or hasn't been added yet). $5 covers thousands of edits. ChatGPT Plus doesn't include API credit."
         case .rateLimited(let seconds):
             if let seconds {
-                "OpenAI rate limit reached. Try again in \(seconds) seconds."
+                "The AI server is busy. Try again in \(seconds) seconds."
             } else {
-                "OpenAI rate limit reached. Wait a moment and try again."
+                "The AI server is busy. Wait a moment and try again."
             }
         case .modelNotFound(let detail):
             "The model isn't available to your account. \(detail)"
@@ -70,13 +70,13 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
         case .invalidBaseURL:
             "The server URL must start with http:// or https://."
         case .serverError(let status):
-            "OpenAI is having problems (HTTP \(status)). Try again shortly."
+            "The AI server is having trouble right now (HTTP \(status)). Try again in a minute."
         case .api(let detail):
-            "OpenAI error: \(detail)"
+            "The AI server returned an error: \(detail)"
         case .network(let detail):
-            "Network error: \(detail)"
+            "Couldn't reach the AI server. Check your connection and try again. (\(detail))"
         case .emptyResponse:
-            "The model returned no text."
+            "The AI server sent back an empty result. Try again."
         case .outputTruncated:
             "The result was cut off because it hit the model's length limit. Replace is disabled so your text isn't shortened; select less text or use Shorten."
         case .contentFiltered:
@@ -86,11 +86,11 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
         case .cancelled:
             "Cancelled."
         case .accessibilityPermissionRequired:
-            "Tajpo needs Accessibility access to read and replace selected text."
+            "To work in other apps, Tajpo needs Accessibility access. It only reads the text you select, when you press the shortcut."
         case .noSelection:
-            "No selected text found. Select text in another app and try again."
+            "Nothing is selected. Highlight some text first, then press the shortcut again."
         case .selectionInTajpo:
-            "Select text in another app, then press the shortcut."
+            "Select text in the app you're writing in, then press the shortcut."
         case .secureField:
             "Tajpo will not read or replace text in password or secure fields."
         case .textTooLarge:
@@ -122,7 +122,7 @@ public enum TajpoError: LocalizedError, Equatable, Sendable {
         case .hotkeyDuplicate:
             "Both actions can't use the same shortcut."
         case .keychain(let status, let message):
-            "Could not access the API key in Keychain (\(message ?? "error \(status)"))."
+            "Tajpo couldn't read your API key from Keychain (\(message ?? "error \(status)")). Try saving it again in Settings."
         case .nothingToRepeat:
             "There is no previous action to repeat yet."
         }

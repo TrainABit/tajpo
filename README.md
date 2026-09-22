@@ -10,7 +10,9 @@ A private macOS menu bar app: select text in any app, press a shortcut, and corr
 
 ## Install
 
-Build a signed app bundle and copy it to /Applications:
+**Download:** get the latest `Tajpo-<version>.dmg` from [Releases](https://github.com/TrainABit/tajpo/releases). Open it and drag Tajpo to Applications. Release builds are signed and notarized. Files from CI runs are ad hoc signed dev builds: macOS blocks them until you allow them in **System Settings ▸ Privacy & Security ▸ Open Anyway**.
+
+**Build from source** and copy the result to /Applications:
 
 ```sh
 git clone https://github.com/TrainABit/tajpo.git
@@ -18,7 +20,13 @@ cd tajpo
 scripts/build-app.sh --install
 ```
 
-On first launch Tajpo opens a short setup guide. It covers Accessibility access, your shortcut (default **⌃⌥T**), your API key, and a practice run.
+On first launch Tajpo opens a short setup guide:
+
+1. Connect your OpenAI key, or a free local model.
+2. Try Tajpo right away in a practice box inside the setup window, using your shortcut (default **⌃⌥T**). No permission is needed for this step.
+3. Allow Accessibility access so Tajpo works in every app.
+
+You can reopen the guide from the menu bar at any time.
 
 ### Keep permissions across rebuilds
 
@@ -40,7 +48,7 @@ scripts/build-app.sh --dmg
 
 1. Select text in any app.
 2. Press **⌃⌥T**. A panel opens next to the selection and shows the text Tajpo read.
-3. Choose **Correct**, **Improve**, **Rewrite**, **Shorten** (⌘1–⌘4) or **Tone** (⌘5; the arrow picks a tone). The result streams in.
+3. Choose **Correct**, **Improve**, **Rewrite**, **Shorten** (⌘1–⌘4) or **Tone** (⌘5; the arrow picks a tone). You can also type your own instruction, such as "make it a bullet list" or "translate to English", and press Return or ⌘6. The result streams in.
 4. Press **Replace** (⌘↩) or **Copy** (⇧⌘C). **Retry** is ⌘R, and ⎋ closes the panel.
 
 **⌃⌥R** repeats your last action on a new selection. Correct shows its changes as a word-level diff; other actions can show one too. Where text can't be edited (web pages, PDFs, terminals), Tajpo offers Copy instead of Replace.
@@ -79,6 +87,8 @@ Open **Settings…** from the menu bar icon:
 | "No API credit" | Add credit to your OpenAI account; the API doesn't use your ChatGPT subscription. |
 | Replace says the selection changed | You clicked elsewhere while the result was being written. Select the text again, or use Copy. |
 | A model is rejected | Use **Test Connection** in Settings. Some models aren't available to every account. |
+| "Tajpo wants to use your confidential information stored in Keychain" | This appears once after switching between differently signed builds, e.g. from a dev build to a release. Click **Always Allow**, or save your key again in Settings. |
+| Something else | Use **Report a Problem…** in the menu bar menu. It opens a GitHub issue with your versions filled in. |
 
 ## Development
 
@@ -95,4 +105,8 @@ The code has two layers:
 - **`Sources/TajpoCore`:** platform-independent logic, covered by tests: prompts, streaming parser, error mapping, validation, output cleanup, diff, shortcut rules, panel placement.
 - **`Sources/Tajpo`:** the macOS app: Accessibility and clipboard, Carbon hotkeys, Keychain, and SwiftUI/AppKit UI.
 
-CI builds and tests on macOS and Linux and produces an ad hoc signed DMG.
+CI builds and tests on macOS and Linux and produces an ad hoc signed DMG. Pushing a `v*` tag runs the release workflow, which builds a signed and notarized DMG. See [RELEASING.md](RELEASING.md) for the one-time setup and the QA checklist.
+
+Also see [PRIVACY.md](PRIVACY.md) and [CHANGELOG.md](CHANGELOG.md).
+
+Tajpo is an independent project. It is not affiliated with or endorsed by OpenAI.

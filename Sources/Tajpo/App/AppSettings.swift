@@ -12,6 +12,9 @@ final class AppSettings: ObservableObject {
         static let repeatShortcut = "repeatShortcut"
         static let lastTone = "lastTone"
         static let recentInstructions = "recentInstructions"
+        static let useDates = "useDates"
+        static let totalUses = "totalUses"
+        static let shownTips = "shownTips"
         // Versions before 0.2.
         static let legacyKeyCode = "hotkeyKeyCode"
         static let legacyModifiers = "hotkeyModifiers"
@@ -83,6 +86,33 @@ final class AppSettings: ObservableObject {
         list.insert(instruction, at: 0)
         defaults.set(Array(list.prefix(6)), forKey: Key.recentInstructions)
         objectWillChange.send()
+    }
+
+    // MARK: Local usage counts (never leave the Mac)
+
+    var totalUses: Int { defaults.integer(forKey: Key.totalUses) }
+
+    /// Replacements and copies in the last 7 days.
+    var usesThisWeek: Int {
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600).timeIntervalSince1970
+        return (defaults.array(forKey: Key.useDates) as? [Double] ?? []).filter { $0 >= cutoff }.count
+    }
+
+    func recordUse() {
+        defaults.set(totalUses + 1, forKey: Key.totalUses)
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600).timeIntervalSince1970
+        var dates = (defaults.array(forKey: Key.useDates) as? [Double] ?? []).filter { $0 >= cutoff }
+        dates.append(Date().timeIntervalSince1970)
+        defaults.set(Array(dates.suffix(500)), forKey: Key.useDates)
+        objectWillChange.send()
+    }
+
+    func hasShownTip(_ id: String) -> Bool {
+        (defaults.stringArray(forKey: Key.shownTips) ?? []).contains(id)
+    }
+
+    func markTipShown(_ id: String) {
+        defaults.set((defaults.stringArray(forKey: Key.shownTips) ?? []) + [id], forKey: Key.shownTips)
     }
 
     private static func loadShortcut(_ defaults: UserDefaults, key: String, fallback: GlobalShortcut?) -> GlobalShortcut? {

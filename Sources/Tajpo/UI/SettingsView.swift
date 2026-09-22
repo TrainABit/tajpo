@@ -1,36 +1,73 @@
+import AppKit
 import SwiftUI
 import TajpoCore
 
-enum SettingsTab: Hashable {
+enum SettingsTab: Int, CaseIterable {
     case general, ai, presets, privacy
-}
 
-@MainActor
-final class SettingsNavigation: ObservableObject {
-    @Published var tab: SettingsTab = .general
-}
-
-struct SettingsView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var navigation: SettingsNavigation
-
-    var body: some View {
-        TabView(selection: $navigation.tab) {
-            GeneralSettings(model: model)
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-            AISettings(model: model)
-                .tabItem { Label("AI Provider", systemImage: "sparkles") }
-                .tag(SettingsTab.ai)
-            PresetSettings(presets: model.presets)
-                .tabItem { Label("Style Presets", systemImage: "text.badge.star") }
-                .tag(SettingsTab.presets)
-            PrivacySettings()
-                .tabItem { Label("Privacy", systemImage: "hand.raised") }
-                .tag(SettingsTab.privacy)
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .ai: "AI Provider"
+        case .presets: "Style Presets"
+        case .privacy: "Privacy"
         }
-        .padding(12)
-        .frame(minWidth: 600, minHeight: 480)
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .ai: "sparkles"
+        case .presets: "text.badge.star"
+        case .privacy: "hand.raised"
+        }
+    }
+}
+
+/// Settings window with native toolbar tabs. Tajpo is a menu bar (accessory)
+/// app, so the SwiftUI `Settings` scene wouldn't reliably come to the front.
+@MainActor
+final class SettingsWindowController: NSObject, NSWindowDelegate {
+    private unowned let model: AppModel
+    private var window: NSWindow?
+    private var tabs: NSTabViewController?
+
+    init(model: AppModel) {
+        self.model = model
+    }
+
+    func show(tab: SettingsTab) {
+        if window == nil { build() }
+        tabs?.selectedTabViewItemIndex = tab.rawValue
+        NSApp.activate()
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+    }
+
+    private func build() {
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        for tab in SettingsTab.allCases {
+            let root: AnyView = switch tab {
+            case .general: AnyView(GeneralSettings(model: model))
+            case .ai: AnyView(AISettings(model: model))
+            case .presets: AnyView(PresetSettings(model: model, presets: model.presets))
+            case .privacy: AnyView(PrivacySettings())
+            }
+            let controller = NSHostingController(rootView: root.frame(width: 580))
+            controller.sizingOptions = [.preferredContentSize]
+            let item = NSTabViewItem(viewController: controller)
+            item.label = tab.title
+            item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
+            tabs.addTabViewItem(item)
+        }
+        let window = NSWindow(contentViewController: tabs)
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        self.tabs = tabs
+        self.window = window
     }
 }
 
@@ -38,42 +75,49 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @ObservedObject var model: AppModel
-    @State private var loginError: String?
+    @State private var loginMessage: String?
 
     var body: some View {
         Form {
-            Section("Shortcuts") {
+            Section {
                 ShortcutSetting(model: model, action: .rewrite)
                 ShortcutSetting(model: model, action: .repeatLast)
-                Text("Shortcuts must include ⌘ or ⌃. Press ⌫ while recording to turn a shortcut off.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if model.secureInputActive {
-                    Label("Another app has secure keyboard entry on (e.g. a password field), which pauses all global shortcuts.", systemImage: "lock")
-                        .font(.caption)
+            } header: {
+                Text("Shortcuts")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Shortcuts must include ⌘ or ⌃. Click a shortcut to record a new one.")
+                    if model.secureInputActive {
+                        Label("Another app has secure keyboard entry on (e.g. a password field), which pauses all global shortcuts.", systemImage: "lock")
+                    }
                 }
+                .foregroundStyle(.secondary)
             }
             Section("Accessibility") {
                 AccessibilityStatus(model: model)
             }
-            Section("Startup") {
+            Section {
                 Toggle("Launch Tajpo at login", isOn: Binding(
                     get: { model.launchAtLoginEnabled },
-                    set: { loginError = model.setLaunchAtLogin($0) }
+                    set: { loginMessage = model.setLaunchAtLogin($0) }
                 ))
                 .disabled(!LaunchAtLogin.isAvailable)
-                if !LaunchAtLogin.isAvailable {
-                    Text("Available when Tajpo runs as an app bundle (scripts/build-app.sh).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let loginError {
-                    Text(loginError).font(.caption).foregroundStyle(.red)
+                if let loginMessage {
+                    ErrorLabel(text: loginMessage)
                 }
                 Button("Show Setup Guide…") { model.showOnboarding() }
+            } header: {
+                Text("Startup")
+            } footer: {
+                if AppLocation.isTemporary {
+                    Text("Move Tajpo to your Applications folder to start it at login.").foregroundStyle(.secondary)
+                } else if !LaunchAtLogin.isAvailable {
+                    Text("Available when Tajpo runs as an app bundle (scripts/build-app.sh).").foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
+        .frame(height: 430)
     }
 }
 
@@ -81,18 +125,18 @@ struct AccessibilityStatus: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if model.accessibilityTrusted {
-                Label("Accessibility access is on.", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                Label("Accessibility access is off. Tajpo can't read or replace selected text.", systemImage: "xmark.circle.fill")
-                    .foregroundStyle(.red)
-                HStack {
-                    Button("Request Access") { model.requestAccessibility() }
-                    Button("Open Accessibility Settings") { model.openAccessibilitySettings() }
+        if model.accessibilityTrusted {
+            Label("Tajpo can read and replace selected text in other apps.", systemImage: "checkmark.circle.fill")
+                .symbolRenderingMode(.multicolor)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Tajpo isn't allowed to work in other apps yet.", systemImage: "exclamationmark.circle.fill")
+                    .symbolRenderingMode(.multicolor)
+                Button("Open Accessibility Settings") {
+                    model.requestAccessibility()
+                    model.openAccessibilitySettings()
                 }
-                Text("If Tajpo is already switched on in the list but this still says off, macOS is holding a permission for an older build: select Tajpo, remove it with −, then add it again.")
+                Text("Already switched on but this still shows? Select Tajpo in the list, remove it with −, then add it again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -101,37 +145,93 @@ struct AccessibilityStatus: View {
     }
 }
 
+struct ErrorLabel: View {
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+        }
+        .font(.callout)
+    }
+}
+
 // MARK: - AI provider
 
 private struct AISettings: View {
+    enum Provider: String, CaseIterable, Identifiable {
+        case openAI = "OpenAI"
+        case custom = "Other server"
+        var id: String { rawValue }
+    }
+
     @ObservedObject var model: AppModel
     @ObservedObject private var settings: AppSettings
 
+    @State private var provider: Provider
     @State private var keyField = ""
     @State private var keyMessage: Message?
     @State private var confirmRemove = false
     @State private var testing = false
-    @State private var modelChoice = ""
-    @State private var customModel = ""
+    @State private var modelChoice: String
+    @State private var customModel: String
     @State private var modelMessage: Message?
-    @State private var baseURLField = ""
-    @State private var projectField = ""
+    @State private var baseURLField: String
+    @State private var projectField: String
     @State private var serverMessage: Message?
 
     private static let custom = "Custom…"
 
     init(model: AppModel) {
         self.model = model
-        settings = model.settings
+        let settings = model.settings
+        self.settings = settings
+        _provider = State(initialValue: settings.usesOpenAI ? .openAI : .custom)
+        _modelChoice = State(initialValue: ModelCatalog.suggested.contains(settings.model) ? settings.model : Self.custom)
+        _customModel = State(initialValue: settings.model)
+        _baseURLField = State(initialValue: settings.usesOpenAI ? "http://localhost:11434/v1" : settings.baseURL.absoluteString)
+        _projectField = State(initialValue: settings.projectID)
     }
 
     var body: some View {
         Form {
-            Section("OpenAI API key") {
+            Section {
+                Picker("Provider", selection: $provider) {
+                    ForEach(Provider.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: provider) { _, new in
+                    if new == .openAI {
+                        applyServer(ModelCatalog.defaultBaseURL.absoluteString)
+                    }
+                }
+            } footer: {
+                Text(provider == .openAI
+                     ? "Your text goes directly from your Mac to OpenAI with your own key."
+                     : "Any OpenAI-compatible server works, including local ones such as Ollama or LM Studio. Your text goes only to this server.")
+                    .foregroundStyle(.secondary)
+            }
+
+            if provider == .custom {
+                Section("Server") {
+                    TextField("Server URL", text: $baseURLField, prompt: Text("http://localhost:11434/v1"))
+                        .onSubmit { applyServer(baseURLField) }
+                    HStack {
+                        Button("Apply") { applyServer(baseURLField) }
+                        Button("Ollama") { baseURLField = "http://localhost:11434/v1"; applyServer(baseURLField) }
+                        Button("LM Studio") { baseURLField = "http://localhost:1234/v1"; applyServer(baseURLField) }
+                    }
+                    MessageView(message: serverMessage)
+                }
+            }
+
+            Section {
                 if let hint = model.apiKeyHint {
                     LabeledContent("Saved in Keychain", value: hint)
                 } else {
-                    Text(settings.usesOpenAI ? "No key saved yet." : "No key saved. Local servers usually don't need one.")
+                    Text(provider == .openAI ? "No key saved yet." : "No key saved. Local servers usually don't need one.")
                         .foregroundStyle(.secondary)
                 }
                 HStack {
@@ -146,21 +246,17 @@ private struct AISettings: View {
                     Button("Remove Key", role: .destructive) { confirmRemove = true }
                         .disabled(model.apiKeyHint == nil)
                     Spacer()
-                    Link("Get an API key", destination: URL(string: "https://platform.openai.com/api-keys")!)
+                    if provider == .openAI {
+                        Link("Get an API key ↗", destination: Links.apiKeys)
+                    }
                 }
                 MessageView(message: keyMessage)
-                Text("API usage is billed by OpenAI separately from ChatGPT subscriptions and needs prepaid credit.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .confirmationDialog("Remove the saved API key?", isPresented: $confirmRemove) {
-                Button("Remove Key", role: .destructive) {
-                    do {
-                        try model.removeAPIKey()
-                        keyMessage = .info("Key removed.")
-                    } catch {
-                        keyMessage = .error(error.localizedDescription)
-                    }
+            } header: {
+                Text("API key")
+            } footer: {
+                if provider == .openAI {
+                    Text("\(ModelCatalog.costHint) API usage is billed by OpenAI separately from ChatGPT and needs prepaid credit.")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -170,7 +266,7 @@ private struct AISettings: View {
                     Text(Self.custom).tag(Self.custom)
                 }
                 .onChange(of: modelChoice) { _, choice in
-                    if choice != Self.custom { applyModel(choice) }
+                    if choice != Self.custom, choice != settings.model { applyModel(choice) }
                 }
                 if modelChoice == Self.custom {
                     HStack {
@@ -180,40 +276,29 @@ private struct AISettings: View {
                     }
                 }
                 if ModelCatalog.isReasoningModel(settings.model) {
-                    Text("Reasoning models are slower and ignore temperature. gpt-4.1-mini is usually the better fit for quick edits.")
+                    Text("Reasoning models are slower for quick edits. gpt-4.1-mini is usually the better fit.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                MessageView(message: modelMessage)
-            }
-
-            Section("Server (advanced)") {
-                TextField("Server URL", text: $baseURLField)
-                    .onSubmit(applyServer)
-                TextField("OpenAI project ID (optional)", text: $projectField)
-                    .onSubmit(applyServer)
-                HStack {
-                    Button("Apply") { applyServer() }
-                    Button("Use OpenAI") {
-                        baseURLField = ModelCatalog.defaultBaseURL.absoluteString
-                        applyServer()
-                    }
+                if provider == .openAI {
+                    TextField("OpenAI project ID (optional)", text: $projectField)
+                        .onSubmit { settings.setProjectID(projectField) }
                 }
-                Text("Any OpenAI-compatible server works, including local ones such as Ollama (http://localhost:11434/v1) or LM Studio. Text is sent only to this server.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                MessageView(message: serverMessage)
+                MessageView(message: modelMessage)
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: loadFields)
-    }
-
-    private func loadFields() {
-        modelChoice = ModelCatalog.suggested.contains(settings.model) ? settings.model : Self.custom
-        customModel = settings.model
-        baseURLField = settings.baseURL.absoluteString
-        projectField = settings.projectID
+        .frame(height: 560)
+        .confirmationDialog("Remove the saved API key?", isPresented: $confirmRemove) {
+            Button("Remove Key", role: .destructive) {
+                do {
+                    try model.removeAPIKey()
+                    keyMessage = .info("Key removed.")
+                } catch {
+                    keyMessage = .error(error.localizedDescription)
+                }
+            }
+        }
     }
 
     private func saveKey() {
@@ -244,18 +329,17 @@ private struct AISettings: View {
         do {
             try settings.setModel(text)
             customModel = settings.model
-            modelMessage = .info("Using \(settings.model).")
+            modelMessage = .success("Now using \(settings.model).")
         } catch {
             modelMessage = .error(error.localizedDescription)
         }
     }
 
-    private func applyServer() {
+    private func applyServer(_ text: String) {
         do {
-            try settings.setBaseURL(baseURLField)
-            settings.setProjectID(projectField)
-            baseURLField = settings.baseURL.absoluteString
-            serverMessage = .info("Using \(settings.baseURL.absoluteString).")
+            try settings.setBaseURL(text)
+            if provider == .openAI { settings.setProjectID(projectField) }
+            serverMessage = .success("Using \(settings.baseURL.absoluteString).")
             model.refreshStatus()
         } catch {
             serverMessage = .error(error.localizedDescription)
@@ -273,12 +357,13 @@ struct MessageView: View {
     var body: some View {
         switch message {
         case .info(let text)?:
-            Text(text).font(.caption).foregroundStyle(.secondary)
+            Text(text).font(.callout).foregroundStyle(.secondary)
         case .success(let text)?:
-            Label(text, systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+            Label(text, systemImage: "checkmark.circle.fill")
+                .symbolRenderingMode(.multicolor)
+                .font(.callout)
         case .error(let text)?:
-            Label(text, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
-                .fixedSize(horizontal: false, vertical: true)
+            ErrorLabel(text: text)
         case nil:
             EmptyView()
         }
@@ -288,68 +373,103 @@ struct MessageView: View {
 // MARK: - Presets
 
 private struct PresetSettings: View {
+    @ObservedObject var model: AppModel
     @ObservedObject var presets: PresetStore
     @State private var editingID: UUID?
+    @State private var confirmRestore = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Picker("Active preset", selection: Binding(get: { presets.selectedID }, set: { presets.select($0) })) {
-                    Text("None").tag(UUID?.none)
-                    ForEach(presets.presets) { Text($0.name).tag(Optional($0.id)) }
-                }
-                .fixedSize()
-                Spacer()
-            }
-            Text("A preset adds your own style instructions to Improve, Rewrite, Shorten, and Change Tone. Correct never uses presets, and a chosen tone wins over a preset.")
-                .font(.caption)
+            Text("A preset adds your own style instructions to Improve, Rewrite, Shorten, Change Tone, and custom instructions. Correct never uses presets, and a chosen tone wins over a preset.")
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HSplitView {
+            HStack(alignment: .top, spacing: 12) {
                 VStack(spacing: 0) {
                     List(selection: $editingID) {
+                        Section {
+                            HStack {
+                                Text("None")
+                                Spacer()
+                                if presets.selectedID == nil { activeBadge }
+                            }
+                            .contextMenu { Button("Use No Preset") { presets.select(nil) } }
+                        }
                         ForEach(presets.presets) { preset in
-                            Text(preset.name).tag(Optional(preset.id))
+                            HStack {
+                                Text(preset.name)
+                                Spacer()
+                                if presets.selectedID == preset.id { activeBadge }
+                            }
+                            .tag(Optional(preset.id))
+                            .contextMenu {
+                                Button("Use This Preset") { presets.select(preset.id) }
+                                Button("Delete", role: .destructive) { delete(preset.id) }
+                            }
                         }
                     }
-                    HStack(spacing: 4) {
+                    .listStyle(.bordered(alternatesRowBackgrounds: false))
+                    HStack(spacing: 2) {
                         Button {
                             editingID = presets.add().id
-                        } label: { Image(systemName: "plus") }
+                        } label: { Image(systemName: "plus").frame(width: 20, height: 18) }
                         .help("Add a preset")
+                        .accessibilityLabel("Add preset")
                         Button {
-                            if let editingID { presets.remove(id: editingID) }
-                            editingID = presets.presets.first?.id
-                        } label: { Image(systemName: "minus") }
+                            if let editingID { delete(editingID) }
+                        } label: { Image(systemName: "minus").frame(width: 20, height: 18) }
                         .disabled(editingID == nil)
                         .help("Delete the selected preset")
+                        .accessibilityLabel("Delete preset")
                         Spacer()
-                        Button("Restore Built-ins") { presets.restoreBuiltIns() }
+                        Button("Restore Built-ins…") { confirmRestore = true }
                             .controlSize(.small)
                     }
                     .buttonStyle(.borderless)
-                    .padding(6)
+                    .padding(.vertical, 4)
                 }
-                .frame(minWidth: 180, maxWidth: 240)
+                .frame(width: 200)
 
                 if let editingID, let preset = presets.presets.first(where: { $0.id == editingID }) {
-                    PresetEditor(preset: preset) { presets.update($0) }
+                    PresetEditor(preset: preset, isActive: presets.selectedID == preset.id,
+                                 activate: { presets.select(preset.id) },
+                                 save: { presets.update($0) })
                         .id(preset.id)
-                        .padding(.leading, 10)
                 } else {
-                    Text("Select a preset to edit it.")
+                    Text("Select a preset to edit it, or click + to create one.")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .padding(8)
+        .padding(20)
+        .frame(height: 420)
         .onAppear { editingID = editingID ?? presets.selectedID ?? presets.presets.first?.id }
+        .confirmationDialog("Restore the built-in presets?", isPresented: $confirmRestore) {
+            Button("Restore") { presets.restoreBuiltIns() }
+        } message: {
+            Text("Professional and Casual are reset to their original instructions. Your own presets are kept.")
+        }
+    }
+
+    private var activeBadge: some View {
+        Text("Active")
+            .font(.caption2.bold())
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.accentColor.opacity(0.2)))
+    }
+
+    private func delete(_ id: UUID) {
+        presets.remove(id: id)
+        editingID = presets.presets.first?.id
     }
 }
 
 private struct PresetEditor: View {
     @State var preset: WritingPreset
+    let isActive: Bool
+    let activate: () -> Void
     let save: (WritingPreset) -> Void
 
     var body: some View {
@@ -357,14 +477,23 @@ private struct PresetEditor: View {
             TextField("Name", text: $preset.name)
                 .textFieldStyle(.roundedBorder)
             Text("Instructions")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
             TextEditor(text: $preset.instructions)
                 .font(.body)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-            Text("Example: “Use British spelling. Keep sentences under 20 words.”")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
+            HStack {
+                Text("Example: “Use British spelling. Keep sentences under 20 words.”")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(isActive ? "Active" : "Use This Preset", action: activate)
+                    .disabled(isActive)
+            }
         }
         .onChange(of: preset) { _, updated in
             var cleaned = updated
@@ -380,17 +509,20 @@ private struct PrivacySettings: View {
     var body: some View {
         Form {
             Section("What leaves your Mac") {
-                Text("Only the text you select, and only when you choose an action. It is sent directly to the AI server configured under AI Provider (OpenAI by default) with your own key. Tajpo has no backend, account, analytics, or text logging.")
-                Text("OpenAI may keep API requests for up to 30 days for abuse monitoring and does not train on API data by default. See OpenAI's API data usage policies for details.")
-                    .foregroundStyle(.secondary)
+                Text("Only the text you select, and only when you choose an action. It goes directly to the AI server set under AI Provider (OpenAI by default) using your own key. Tajpo has no backend, account, analytics, or text logging.")
+                Link("How OpenAI handles API data ↗", destination: Links.dataUsage)
             }
             Section("Clipboard") {
                 Text("In apps that don't support Accessibility, Tajpo briefly uses the clipboard to copy the selection and paste the result, then restores what you had. These temporary items are marked so clipboard managers skip them.")
             }
             Section("Stored on this Mac") {
-                Text("Your API key is kept in the macOS Keychain. Settings and presets are kept in Tajpo's preferences. Nothing else is stored.")
+                Text("Your API key is kept in the macOS Keychain. Settings, presets, recent instructions, and a local count of your edits are kept in Tajpo's preferences. Nothing else is stored.")
+            }
+            Section {
+                Link("Read the full privacy policy ↗", destination: Links.privacy)
             }
         }
         .formStyle(.grouped)
+        .frame(height: 420)
     }
 }

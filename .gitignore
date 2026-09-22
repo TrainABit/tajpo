@@ -9,3 +9,7 @@ DerivedData/
 *.dmg
 *.xcarchive
 .env
+*.p12
+*.p8
+AuthKey_*.p8
+*.dSYM.zip

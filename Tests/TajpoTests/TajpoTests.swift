@@ -241,6 +241,8 @@ import Testing
         #expect(TajpoError.textTooLarge.errorDescription?.contains("or fewer") == true)
         #expect(TajpoError.hotkeyInUse("⌃⌥T").errorDescription?.contains("already used") == true)
         #expect(TajpoError.hotkeyRejectedBySystem("⌥T").errorDescription?.contains("refused") == true)
+        #expect(TajpoError.insufficientQuota.errorDescription?.contains("ChatGPT Plus") == true)
+        #expect(TajpoError.serverError(503).errorDescription?.contains("AI server") == true)
     }
 }
 

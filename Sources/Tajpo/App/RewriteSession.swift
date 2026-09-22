@@ -25,6 +25,8 @@ final class RewriteSession: ObservableObject {
     @Published private(set) var error: TajpoError?
     @Published private(set) var notice: String?
     @Published var isReplacing = false
+    /// A one-time feature tip shown under the result.
+    @Published var tip: String?
     @Published var showChanges = true
 
     func reset() {
@@ -38,6 +40,7 @@ final class RewriteSession: ObservableObject {
         notice = nil
         isReplacing = false
         instruction = ""
+        tip = nil
     }
 
     func captured(_ capture: TextCapture) {
