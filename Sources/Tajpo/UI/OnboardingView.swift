@@ -93,7 +93,7 @@ struct OnboardingView: View {
         .padding(.top, 22)
         .padding(.bottom, 24)
         .frame(width: 640)
-        .frame(minHeight: 430)
+        .frame(minHeight: 380)
         // The window follows each step's height instead of leaving empty space.
         .fixedSize(horizontal: false, vertical: true)
         .animation(reduceMotion ? nil : .snappy, value: step)

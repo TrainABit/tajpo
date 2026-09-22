@@ -66,8 +66,6 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
         guard let panel, contentHeight > 0 else { return }
         let height = ceil(contentHeight)
         guard abs(panel.frame.height - height) >= 1 else { return }
-        panel.contentMinSize = NSSize(width: Self.minimumWidth, height: height)
-        panel.contentMaxSize = NSSize(width: 4000, height: height)
         let size = NSSize(width: panel.frame.width, height: height)
         if userMoved || !panel.isVisible {
             // Keep the top edge where the user put it, and stay on screen.
@@ -90,6 +88,11 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
         onClose?()
     }
 
+    /// Only the width is user-resizable; the height follows the content.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(width: max(frameSize.width, Self.minimumWidth), height: sender.frame.height)
+    }
+
     func windowDidMove(_ notification: Notification) {
         if !isPlacing { userMoved = true }
     }
@@ -110,6 +113,11 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
     private func setFrame(_ frame: NSRect, on panel: NSPanel) {
         isPlacing = true
         panel.setFrame(frame, display: true)
+        // Keep the content in step with the frame, which matters most when the panel shrinks.
+        if let content = panel.contentView {
+            content.frame = NSRect(origin: .zero, size: frame.size)
+            content.layoutSubtreeIfNeeded()
+        }
         isPlacing = false
     }
 
@@ -134,7 +142,7 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
         panel.becomesKeyOnlyIfNeeded = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.contentMinSize = NSSize(width: Self.minimumWidth, height: 120)
+        panel.minSize = NSSize(width: Self.minimumWidth, height: 100)
         panel.delegate = self
 
         // A translucent background like other floating Mac panels.
@@ -225,7 +233,7 @@ struct InlineRewriteView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 7)
+        .padding(.top, 5)
         .padding(.bottom, 14)
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in

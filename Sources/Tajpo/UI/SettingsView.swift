@@ -135,7 +135,7 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 510)
+        .frame(height: 490)
     }
 }
 
@@ -307,7 +307,7 @@ private struct AISettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 490)
+        .frame(height: 470)
         .onAppear(perform: syncFromSettings)
         .onReceive(settings.$baseURL.dropFirst()) { _ in syncFromSettings() }
         .onReceive(settings.$model.dropFirst()) { _ in syncFromSettings() }
@@ -556,6 +556,6 @@ private struct PrivacySettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 420)
+        .frame(height: 490)
     }
 }
