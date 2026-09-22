@@ -388,6 +388,7 @@ struct InlineRewriteView: View {
         } label: {
             Label(presets.selected.map { "Style: \($0.name)" } ?? "No style preset", systemImage: "text.badge.star")
                 .font(.callout)
+                .foregroundStyle(presets.selected == nil ? .secondary : .primary)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -400,6 +401,8 @@ struct InlineRewriteView: View {
                 .textFieldStyle(.roundedBorder)
                 .controlSize(.large)
                 .focused($instructionFocused)
+                // Typing still goes here, but the ring shouldn't be the loudest thing on open.
+                .focusEffectDisabled()
                 .onSubmit { model.run(.custom) }
                 .accessibilityLabel("Custom instruction")
             Menu {
