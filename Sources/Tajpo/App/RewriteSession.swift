@@ -14,6 +14,10 @@ final class RewriteSession: ObservableObject {
     @Published private(set) var capture: TextCapture?
     @Published private(set) var action: RewriteAction?
     @Published var tone: RewriteTone = .professional
+    /// Text of the "Tell Tajpo what to do" field for the custom action.
+    @Published var instruction = ""
+    /// Set to move keyboard focus to the instruction field.
+    @Published var focusInstruction = false
     @Published private(set) var preview = ""
     /// Final replacement text. Only set for complete, usable results.
     @Published private(set) var result: String?
@@ -33,6 +37,7 @@ final class RewriteSession: ObservableObject {
         error = nil
         notice = nil
         isReplacing = false
+        instruction = ""
     }
 
     func captured(_ capture: TextCapture) {

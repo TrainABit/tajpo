@@ -11,6 +11,7 @@ final class AppSettings: ObservableObject {
         static let rewriteShortcut = "rewriteShortcut"
         static let repeatShortcut = "repeatShortcut"
         static let lastTone = "lastTone"
+        static let recentInstructions = "recentInstructions"
         // Versions before 0.2.
         static let legacyKeyCode = "hotkeyKeyCode"
         static let legacyModifiers = "hotkeyModifiers"
@@ -70,6 +71,18 @@ final class AppSettings: ObservableObject {
     var lastTone: RewriteTone {
         get { defaults.string(forKey: Key.lastTone).flatMap(RewriteTone.init(rawValue:)) ?? .professional }
         set { defaults.set(newValue.rawValue, forKey: Key.lastTone) }
+    }
+
+    /// Custom instructions the user ran recently, newest first.
+    var recentInstructions: [String] {
+        defaults.stringArray(forKey: Key.recentInstructions) ?? []
+    }
+
+    func rememberInstruction(_ instruction: String) {
+        var list = recentInstructions.filter { $0.caseInsensitiveCompare(instruction) != .orderedSame }
+        list.insert(instruction, at: 0)
+        defaults.set(Array(list.prefix(6)), forKey: Key.recentInstructions)
+        objectWillChange.send()
     }
 
     private static func loadShortcut(_ defaults: UserDefaults, key: String, fallback: GlobalShortcut?) -> GlobalShortcut? {

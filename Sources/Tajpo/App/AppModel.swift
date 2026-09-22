@@ -23,6 +23,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWorking = false
     @Published private(set) var status = "Ready"
     @Published private(set) var lastAction: RewriteAction?
+    private var lastInstruction: String?
     @Published private(set) var launchAtLoginEnabled = false
 
     let settings: AppSettings
@@ -103,6 +104,12 @@ final class AppModel: ObservableObject {
 
     // MARK: Hotkeys
 
+    var lastActionTitle: String? {
+        guard let lastAction else { return nil }
+        if lastAction == .custom, let lastInstruction { return "“\(lastInstruction)”" }
+        return lastAction.title
+    }
+
     private func handleHotkey(_ action: HotkeyAction) {
         if let probe = shortcutProbe {
             probe()
@@ -133,7 +140,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Panel flow
 
-    func openPanel(thenRun action: RewriteAction? = nil) {
+    func openPanel(thenRun action: RewriteAction? = nil, instruction: String? = nil) {
         guard !isCapturing, !session.isReplacing else { return }
         cancelRun()
         session.reset()
@@ -152,6 +159,7 @@ final class AppModel: ObservableObject {
                 session.captured(capture)
                 panel.show(model: self, near: capture.bounds)
                 if let action {
+                    if let instruction { session.instruction = instruction }
                     run(action)
                 } else if let problem = configurationProblem() {
                     session.fail(problem)
@@ -165,6 +173,11 @@ final class AppModel: ObservableObject {
 
     func run(_ action: RewriteAction) {
         guard let capture = session.capture, !session.isReplacing else { return }
+        let instruction = session.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action == .custom && instruction.isEmpty {
+            session.focusInstruction = true
+            return
+        }
         if let problem = configurationProblem() {
             session.fail(problem)
             return
@@ -180,7 +193,8 @@ final class AppModel: ObservableObject {
         let id = UUID()
         runID = id
         let tone = session.tone
-        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model)
+        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model,
+                                            instruction: action == .custom ? instruction : nil)
         let tag = PromptBuilder.tagName(for: capture.text)
         let client = makeClient(try? keyStore.load(), settings.baseURL, settings.projectID)
         session.begin(action)
@@ -196,6 +210,8 @@ final class AppModel: ObservableObject {
                 guard let self, self.runID == id else { return }
                 self.session.finish(OutputCleaner.finalize(output, original: capture.text, tag: tag))
                 self.lastAction = action
+                self.lastInstruction = action == .custom ? instruction : nil
+                if action == .custom { self.settings.rememberInstruction(instruction) }
                 self.settings.lastTone = tone
                 self.endRun(status: "Ready to replace")
             } catch {
@@ -261,7 +277,7 @@ final class AppModel: ObservableObject {
             panel.show(model: self, near: nil)
             return
         }
-        openPanel(thenRun: lastAction)
+        openPanel(thenRun: lastAction, instruction: lastInstruction)
     }
 
     func closePanel(status: String? = nil) {

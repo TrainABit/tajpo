@@ -103,11 +103,22 @@ struct InlineRewriteView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var session: RewriteSession
     @ObservedObject private var presets: PresetStore
+    @ObservedObject private var settings: AppSettings
+    @FocusState private var instructionFocused: Bool
+
+    private static let suggestions = [
+        "Translate to English",
+        "Make it a bullet list",
+        "Make it more formal",
+        "Explain it more simply",
+        "Fix the formatting"
+    ]
 
     init(model: AppModel, session: RewriteSession) {
         self.model = model
         self.session = session
         presets = model.presets
+        settings = model.settings
     }
 
     var body: some View {
@@ -115,6 +126,7 @@ struct InlineRewriteView: View {
             if let capture = session.capture {
                 OriginalTextView(text: capture.text)
                 actionRow
+                instructionRow
                 presetRow
             }
             if session.isRunning {
@@ -138,7 +150,7 @@ struct InlineRewriteView: View {
 
     private var actionRow: some View {
         HStack(spacing: 6) {
-            ForEach(RewriteAction.allCases.filter { $0 != .changeTone }) { action in
+            ForEach(RewriteAction.buttons.filter { $0 != .changeTone }) { action in
                 Button(action.title) { model.run(action) }
                     .keyboardShortcut(KeyEquivalent(Character(String(action.shortcutNumber))), modifiers: .command)
                     .buttonStyle(.bordered)
@@ -162,6 +174,47 @@ struct InlineRewriteView: View {
         }
         .disabled(!session.canRun)
         .controlSize(.regular)
+    }
+
+    private var instructionRow: some View {
+        HStack(spacing: 6) {
+            TextField("Or tell Tajpo what to do, e.g. “make it a bullet list”", text: $session.instruction)
+                .textFieldStyle(.roundedBorder)
+                .focused($instructionFocused)
+                .onSubmit { model.run(.custom) }
+                .accessibilityLabel("Custom instruction")
+            Menu {
+                let recent = settings.recentInstructions
+                if !recent.isEmpty {
+                    Section("Recent") {
+                        ForEach(recent, id: \.self) { item in
+                            Button(item) { session.instruction = item; model.run(.custom) }
+                        }
+                    }
+                }
+                Section("Ideas") {
+                    ForEach(Self.suggestions, id: \.self) { item in
+                        Button(item) { session.instruction = item; model.run(.custom) }
+                    }
+                }
+            } label: {
+                Image(systemName: "text.badge.plus")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Recent and suggested instructions")
+            .accessibilityLabel("Instruction suggestions")
+            Button("Go") { model.run(.custom) }
+                .keyboardShortcut("6", modifiers: .command)
+                .help("Run the instruction (⌘6)")
+        }
+        .disabled(!session.canRun)
+        .onChange(of: session.focusInstruction) { _, focus in
+            if focus {
+                instructionFocused = true
+                session.focusInstruction = false
+            }
+        }
     }
 
     private var presetRow: some View {
@@ -196,7 +249,7 @@ struct InlineRewriteView: View {
                 } else if !session.preview.isEmpty {
                     Text(session.preview)
                 } else if session.phase == .ready {
-                    Text("Choose an action. ⌘1–⌘5 work too.")
+                    Text("Choose an action, or type your own instruction. ⌘1–⌘6 work too.")
                         .foregroundStyle(.secondary)
                 } else if session.phase == .capturing {
                     Text("Reading the selection…")

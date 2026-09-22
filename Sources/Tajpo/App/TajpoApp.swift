@@ -59,7 +59,7 @@ struct MenuContent: View {
         Divider()
 
         Button(title("Rewrite Selection", settings.rewriteShortcut)) { model.openPanel() }
-        Button(title(model.lastAction.map { "Repeat \($0.title)" } ?? "Repeat Last Action", settings.repeatShortcut)) {
+        Button(title(model.lastActionTitle.map { "Repeat \($0)" } ?? "Repeat Last Action", settings.repeatShortcut)) {
             model.repeatLastAction()
         }
         .disabled(model.lastAction == nil)
