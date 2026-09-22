@@ -4,6 +4,50 @@ Audited commit `419128e` (`main`, after PR #1) on 2026-09-22. No source files we
 
 > **TL;DR.** The code **does not compile.** There are 4 errors, checked against the real macOS SDKs, and 3 of them came in with the previous automated audit (PR #1). Even after it builds, it **isn't a real app yet.** It is a bare SwiftPM binary, so Accessibility and Keychain access reset on every rebuild, the Dock icon flashes, and some README steps can't be done. The core **Replace step can damage text.** Output can be cut short without warning, newlines get stripped, the text can land in the wrong place, a race enables Replace while text is still streaming, and the paste can end up in Tajpo's own panel. The default **prompts contradict each other.** **First-run setup** has four hard failures. Each item below has a file:line, a failure scenario and a fix. A small checked patch for the build errors (4 files, about 8 lines) is in [Appendix C](#appendix-c-verified-build-fix-patch).
 
+## Status (updated after the fix pass)
+
+Every finding below was addressed in the follow-up change on this branch, except where noted. The findings are kept as written, for reference.
+
+- **Build:** compiles with 0 errors and 0 warnings against the macOS 26.1 and 15.5 SDKs in Swift 6 mode, through SIL data-race checks. Logic moved into a `TajpoCore` library with 51 tests that run on macOS and Linux. CI covers both (B1, B2, B4).
+- **Packaging:** `scripts/build-app.sh` builds a signed `Tajpo.app` with Info.plist (`LSUIElement`, bundle ID, version) and a proper icon. It can also notarize and build a DMG. The README explains stable signing so permissions survive rebuilds (B3, B5).
+- **Replace pipeline:**
+  - Run IDs stop stale runs from touching state (R1).
+  - `finish_reason` is checked, and inputs are limited to what the model can return in full (R2).
+  - Whitespace is preserved (R3).
+  - The panel hides before pasting, and the paste only happens into the original app if it is still in front (R4, R5).
+  - Replacements are verified and the result is reported honestly (R6).
+  - An empty AX selection falls back to the clipboard (R7).
+  - The clipboard is polled via changeCount (R8).
+  - Key codes follow the current layout, and the paste waits for modifier release (R9).
+  - Editability and terminals are checked (R10).
+  - Re-entry is guarded (R11).
+  - AX calls have a timeout, Tajpo never queries its own windows over AX, and the secure-field walk is bounded (R12).
+  - File copies are rejected (R13).
+  - Temporary clipboard items are marked transient, and the pasteboard access setting is respected (R14).
+  - The clipboard snapshot keeps type order (R15).
+- **Flows:** Repeat opens the panel and has its own shortcut (A1). Cancellation is mapped correctly (A2). Built-in presets have stable IDs, and old data is migrated (A3). Tone menu entries run immediately; the unused menu pickers are gone (A4). Dead code was removed (A5).
+- **LLM:**
+  - The prompts were rewritten: presets never apply to Correct, the tone wins, and the text is wrapped in delimiters (L1, L2).
+  - 429 errors are split into no-credit and rate-limit (L3).
+  - Model picker plus custom model; temperature is left out for reasoning models (L4).
+  - Wrapping quotes and code fences are stripped (L5).
+  - Configurable server URL and project ID (L6).
+- **Shortcuts:** a new shortcut is registered before the old one is released, and only saved on success. The Carbon handler checks the hotkey ID. There's a recorder with validation (⌘ or ⌃ required, system shortcuts rejected) and specific error messages. Symbols use the ⌃⌥⇧⌘ order, and Secure Input is detected. The default moved to ⌃⌥T (H1–H4).
+- **UI:**
+  - The menu is built for menu style (U1).
+  - Settings are a real window that comes to the front (U2).
+  - The panel shows the original text, the preset, and a diff. It has shortcuts, is resizable, closes on an outside click when idle, and flips above the selection when needed (U3).
+  - Errors come with recovery buttons (U4).
+  - Settings have tabs, key status and Test Connection, a preset editor and Accessibility status (U5).
+  - Wording fixes (U6); launch at login, About and a setup-needed icon (U7).
+- **Setup:** onboarding was rebuilt: no crash, the key is saved on Return, live Accessibility status, a working shortcut test, a key check with billing hints, a working practice step, a finish checklist, and it can be reopened from the menu (S1–S8).
+- **Security, performance and docs:** Keychain updates in place, and the status check never reads the secret (K1–K3). Streaming state is isolated and updates are throttled (§11). os.Logger is used without logging text (§12). The README was rewritten (§13).
+
+**Not done:**
+- **No LICENSE.** Choosing a license is the owner's decision.
+- **No app-layer unit tests.** They would need a Mac to verify. The logic they would cover now lives in `TajpoCore`, which is tested.
+- **Needs a Mac.** Items marked Likely are fixed defensively, but should still be checked on a Mac using Appendix D.
+
 ## Contents
 
 1. [Method and legend](#1-method-and-legend)

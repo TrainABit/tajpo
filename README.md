@@ -1,46 +1,98 @@
 # Tajpo
 
-A private native macOS menu bar app: select text anywhere, press a global shortcut, and improve, rewrite, shorten, or change its tone.
+A private macOS menu bar app: select text in any app, press a shortcut, and correct, improve, rewrite, shorten, or change its tone. You check the result next to your text, then replace or copy it.
+
+## Requirements
+
+- macOS 14 Sonoma or later
+- An OpenAI API key **with prepaid credit** ([create a key](https://platform.openai.com/api-keys), [add credit](https://platform.openai.com/settings/organization/billing/overview)). API usage is billed separately from ChatGPT subscriptions. Or any OpenAI-compatible server, such as Ollama or LM Studio, which needs no key.
+- To build: Xcode 16 or later (Swift 6)
+
+## Install
+
+Build a signed app bundle and copy it to /Applications:
+
+```sh
+git clone https://github.com/TrainABit/tajpo.git
+cd tajpo
+scripts/build-app.sh --install
+```
+
+On first launch Tajpo opens a short setup guide. It covers Accessibility access, your shortcut (default **⌃⌥T**), your API key, and a practice run.
+
+### Keep permissions across rebuilds
+
+macOS ties the Accessibility permission to the app's code signature. The default ad hoc signature changes on every build, so macOS forgets the permission each time. You'll see Tajpo switched on in System Settings but still get "Tajpo needs Accessibility access". Sign with a stable identity to avoid this:
+
+1. Open **Keychain Access ▸ Certificate Assistant ▸ Create a Certificate…**
+2. Name it `Tajpo Dev`. Set Identity Type to **Self Signed Root** and Certificate Type to **Code Signing**. Click Create.
+3. Build with `SIGN_IDENTITY="Tajpo Dev" scripts/build-app.sh --install`
+
+If you have an Apple Developer account, use your Developer ID identity. You can also notarize and create a DMG:
+
+```sh
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_PROFILE=your-notarytool-profile \
+scripts/build-app.sh --dmg
+```
+
+## Use
+
+1. Select text in any app.
+2. Press **⌃⌥T**. A panel opens next to the selection and shows the text Tajpo read.
+3. Choose **Correct**, **Improve**, **Rewrite**, **Shorten** (⌘1–⌘4) or **Tone** (⌘5; the arrow picks a tone). The result streams in.
+4. Press **Replace** (⌘↩) or **Copy** (⇧⌘C). **Retry** is ⌘R, and ⎋ closes the panel.
+
+**⌃⌥R** repeats your last action on a new selection. Correct shows its changes as a word-level diff; other actions can show one too. Where text can't be edited (web pages, PDFs, terminals), Tajpo offers Copy instead of Replace.
+
+**Style presets** add your own instructions, such as "Use British spelling", to Improve, Rewrite, Shorten and Change Tone. Correct never uses presets, and a chosen tone overrides a preset. Pick the active preset from the menu bar, the panel, or Settings.
+
+## How it works
+
+- **Reading the selection.** Tajpo reads it through the Accessibility API. Apps that don't support that (some Electron and cross-platform apps) are handled with a synthetic ⌘C. The clipboard is restored afterwards, and temporary items are marked so clipboard managers ignore them.
+- **Replacing text.** Replace writes through Accessibility when possible and checks the result. Otherwise it pastes with ⌘V into the original app, but only if that app is still in front and the same text is still selected. If not, it tells you instead of pasting somewhere else.
+- **Streaming.** The OpenAI Chat Completions response streams in. If the model stops because of its length limit or a content filter, Replace is disabled so your text is never swapped for a cut-off version.
+- **What gets sent.** The selected text goes to the model inside delimiters, with instructions to edit it rather than reply to it.
 
 ## Privacy
 
-Tajpo has no account, backend, analytics, or text logging. Text stays on the Mac except for direct calls from the app to OpenAI using the user's own API key. The key is stored in macOS Keychain. A local MLX/llama.cpp provider is planned behind the same client boundary.
+- **What leaves your Mac.** Text leaves only when you choose an action. It goes directly to the server set under **Settings ▸ AI Provider**, which is OpenAI by default, using your own key.
+- **What Tajpo doesn't have.** There is no backend, no account, no analytics, and no text logging.
+- **Where things are stored.** The API key lives in the macOS Keychain.
+- **Password fields.** Tajpo refuses to read secure and password fields.
 
-## MVP
+## Settings
 
-- Accessibility API selection capture and replacement
-- Clipboard fallback with clipboard backup/restore
-- Accessibility permission prompt and actionable errors
-- OpenAI Chat Completions (`gpt-4o-mini` default, configurable)
-- Correct, improve, rewrite, shorten, and tone actions
-- Configurable key and modifiers for the global Carbon hotkey (requires at least one modifier)
-- Menu bar progress, status, and error feedback
-- Clear missing-key, network, API, empty-response, and rate-limit errors
+Open **Settings…** from the menu bar icon:
 
-## Build in Xcode
+- **General:** the two shortcuts (click to record), Accessibility status, and launch at login.
+- **AI Provider:** API key status and Test Connection, the model (default `gpt-4.1-mini`), and the server URL for OpenAI-compatible servers such as Ollama (`http://localhost:11434/v1`).
+- **Style Presets:** create, edit, delete, and restore presets.
+- **Privacy:** what is sent where.
 
-1. Clone or download the repository.
-2. In Xcode choose **File > Open** and select `Package.swift`.
-3. Select the `Tajpo` scheme and **My Mac** destination.
-4. In **Signing & Capabilities**, choose your Apple Developer Team if Xcode requests signing.
-5. Build and run.
-6. Open Tajpo Settings, save an OpenAI API key, then request Accessibility access.
-7. If macOS does not refresh permission immediately after rebuilding, remove the old Tajpo entry under **System Settings > Privacy & Security > Accessibility**, add/enable the current build, and relaunch.
+## Troubleshooting
 
-The app targets macOS 14 and Swift 6. Tajpo hides the Dock icon at launch (`NSApplication.ActivationPolicy.accessory`) and registers the global hotkey immediately, so you do not need to open the menu first. For a Dock-less archived build, also set `LSUIElement` to YES in the target Info tab. Because this environment cannot run Xcode/macOS frameworks, the first Xcode build may reveal a small SDK/compiler adjustment.
+| Problem | Fix |
+|---|---|
+| "Tajpo needs Accessibility access" although it's switched on | The permission belongs to an older build. In **System Settings ▸ Privacy & Security ▸ Accessibility**, select Tajpo, remove it with −, add it again, and use a stable signing identity (see above). `tccutil reset Accessibility com.trainabit.tajpo` also clears it. |
+| The shortcut does nothing | Check the menu bar menu for a ⚠︎ warning. Another app may use the same shortcut; record a different one in Settings. Shortcuts pause while another app has secure keyboard entry on, e.g. a focused password field. |
+| "No API credit" | Add credit to your OpenAI account; the API doesn't use your ChatGPT subscription. |
+| Replace says the selection changed | You clicked elsewhere while the result was being written. Select the text again, or use Copy. |
+| A model is rejected | Use **Test Connection** in Settings. Some models aren't available to every account. |
 
-## Next
+## Development
 
-Local MLX/llama.cpp inference, signed/notarized distribution, richer shortcut recording, streaming UI, and tests for Accessibility behavior across host apps are deliberately outside this first MVP.
+```sh
+swift build          # builds TajpoCore and the app (macOS)
+swift test           # runs the TajpoCore tests (macOS or Linux)
+swift run Tajpo      # runs the app without a bundle
+```
 
-## Streaming and safety
+`swift run` and running from Xcode start the app without a bundle. macOS then attributes the Accessibility permission to Terminal or Xcode, and launch at login is unavailable. Use `scripts/build-app.sh` for real use.
 
-OpenAI responses stream over the Chat Completions SSE connection. The menu shows received character progress while the model writes. Tajpo rejects secure/password fields (including ancestor AX roles), empty selections, and selections above 100,000 characters. Clipboard fallback restores all pasteboard item data after copying or pasting, and paste replacement reactivates the source app so text does not land in Tajpo.
+The code has two layers:
 
-## Inline workflow
+- **`Sources/TajpoCore`:** platform-independent logic, covered by tests: prompts, streaming parser, error mapping, validation, output cleanup, diff, shortcut rules, panel placement.
+- **`Sources/Tajpo`:** the macOS app: Accessibility and clipboard, Carbon hotkeys, Keychain, and SwiftUI/AppKit UI.
 
-Select text and press the global shortcut. Tajpo reads the AX selection bounds and opens a floating SwiftUI-backed `NSPanel` beside the cursor. Choose Correct, Improve, Rewrite, Shorten, or Tone. Output streams in the panel, then Replace, Copy, or Retry. The menu bar remains a lightweight status/settings hub.
-
-Writing presets include Professional and Casual, with custom name + system prompt creation in Settings. All action prompts pass through the separately testable `PromptBuilder.antiSlop` rules. Correction intentionally changes only grammar, spelling, and punctuation.
-
-First launch opens a five-step onboarding window: product explanation, just-in-time Accessibility rationale/request, shortcut exercise, Keychain API-key setup, and a practice field.
+CI builds and tests on macOS and Linux and produces an ad hoc signed DMG.
