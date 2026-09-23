@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
         DispatchQueue.main.async {
-            AppLocation.offerMoveIfNeeded()
+            AppLocation.offerFinderHandoffIfNeeded()
             EditMenu.installIfMissing()
             EditMenu.installWindowMenuIfMissing()
             AppModel.shared.start()

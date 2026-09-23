@@ -132,7 +132,7 @@ private struct GeneralSettings: View {
                 Text("The update check asks GitHub for the latest release number. It sends nothing about you or your text.")
                     .foregroundStyle(.secondary)
                 if AppLocation.isTemporary {
-                    Text("Move Tajpo to your Applications folder to start it at login.").foregroundStyle(.secondary)
+                    Text("Tajpo is running from a temporary location. Drag it from Finder into Applications to start it at login.").foregroundStyle(.secondary)
                 } else if !LaunchAtLogin.isAvailable {
                     Text("Available when Tajpo runs as an app bundle (scripts/build-app.sh).").foregroundStyle(.secondary)
                 }

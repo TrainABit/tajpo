@@ -12,6 +12,9 @@
 #   BUNDLE_ID       Default com.trainabit.tajpo
 #   VERSION         MAJOR[.MINOR[.PATCH]]. Default: latest git tag without "v", else 0.2.0
 #   UNIVERSAL       1 (default) builds arm64 + x86_64; 0 builds this Mac's arch.
+#   INSTALL_ROOT    Destination directory for --install (default /Applications).
+#                   Useful for a disposable verification directory.
+#   EXPECTED_TEAM_ID  Require this signing team before --install replaces an app.
 #
 # Notarization (optional; either one):
 #   NOTARY_PROFILE                          notarytool keychain profile
@@ -161,12 +164,226 @@ if [[ "$MAKE_DMG" == "1" ]]; then
   shasum -a 256 "$DMG" | tee "$DMG.sha256"
 fi
 
+INSTALL_STAGE=""
+INSTALL_BACKUP=""
+INSTALL_DESTINATION=""
+INSTALL_COMMITTED=0
+INSTALL_KEEP_STAGE=0
+
+cleanup_install_stage() {
+  if [[ -z "$INSTALL_STAGE" || ! -e "$INSTALL_STAGE" ]]; then
+    return
+  fi
+  if [[ "$INSTALL_COMMITTED" != "1" && -n "$INSTALL_BACKUP" && -e "$INSTALL_BACKUP" ]]; then
+    if ! restore_previous_install; then
+      INSTALL_KEEP_STAGE=1
+      echo "Could not restore the previous app; rollback data is in $INSTALL_STAGE" >&2
+      return
+    fi
+  fi
+  if [[ "$INSTALL_KEEP_STAGE" == "1" ]]; then
+    echo "Installation rollback data kept at $INSTALL_STAGE" >&2
+  else
+    rm -rf "$INSTALL_STAGE" || true
+  fi
+}
+trap 'status=$?; rm -rf "$TMPROOT" || true; cleanup_install_stage; exit "$status"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+install_die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+signature_field() {
+  local details="$1"
+  local key="$2"
+  printf '%s\n' "$details" | awk -v key="$key" '
+    index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }
+  '
+}
+
+normalize_team() {
+  local team="${1:-}"
+  if [[ "$team" == "not set" ]]; then
+    printf '%s' ""
+  else
+    printf '%s' "$team"
+  fi
+}
+
+read_signature() {
+  local app="$1"
+  local details
+  SIGNATURE_IDENTIFIER=""
+  SIGNATURE_TEAM=""
+  SIGNATURE_AUTHORITY=""
+  SIGNATURE_KIND=""
+
+  if ! details="$(codesign --display --verbose=4 "$app" 2>&1)"; then
+    echo "Could not read the code signature for $app" >&2
+    return 1
+  fi
+  SIGNATURE_IDENTIFIER="$(signature_field "$details" Identifier)"
+  SIGNATURE_TEAM="$(normalize_team "$(signature_field "$details" TeamIdentifier)")"
+  SIGNATURE_AUTHORITY="$(signature_field "$details" Authority)"
+  SIGNATURE_KIND="$(signature_field "$details" Signature)"
+  # Older codesign output has no `Signature=` line for CMS signatures; the
+  # authority is the positive signal in that format. Ad-hoc signatures use
+  # `Signature=adhoc` (or the CodeDirectory flag).
+  if [[ -z "$SIGNATURE_KIND" && -n "$SIGNATURE_AUTHORITY" ]]; then
+    SIGNATURE_KIND="signed"
+  fi
+  if [[ -z "$SIGNATURE_IDENTIFIER" || -z "$SIGNATURE_KIND" ]]; then
+    echo "The code signature for $app is missing identifying information" >&2
+    return 1
+  fi
+  if [[ -n "$SIGNATURE_TEAM" && -z "$SIGNATURE_AUTHORITY" ]]; then
+    echo "The code signature for $app has a team but no authority" >&2
+    return 1
+  fi
+  return 0
+}
+
+verify_app() {
+  local app="$1"
+  local label="$2"
+  local bundle_id signature_id
+
+  if [[ ! -d "$app" || -L "$app" ]]; then
+    echo "$label is not a real app directory: $app" >&2
+    return 1
+  fi
+  if [[ ! -f "$app/Contents/Info.plist" || ! -x "$app/Contents/MacOS/Tajpo" ]]; then
+    echo "$label is missing its app bundle contents: $app" >&2
+    return 1
+  fi
+  if ! bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null)"; then
+    echo "$label has no readable CFBundleIdentifier" >&2
+    return 1
+  fi
+  if [[ "$bundle_id" != "$BUNDLE_ID" ]]; then
+    echo "$label has bundle identifier '$bundle_id', expected '$BUNDLE_ID'" >&2
+    return 1
+  fi
+  if ! codesign --verify --deep --strict "$app" >/dev/null; then
+    echo "$label failed code-signature verification" >&2
+    return 1
+  fi
+  if ! read_signature "$app"; then
+    return 1
+  fi
+  signature_id="$SIGNATURE_IDENTIFIER"
+  if [[ "$signature_id" != "$BUNDLE_ID" ]]; then
+    echo "$label signature identifies '$signature_id', expected '$BUNDLE_ID'" >&2
+    return 1
+  fi
+  return 0
+}
+
+restore_previous_install() {
+  local failed="$INSTALL_STAGE/failed.app"
+  if [[ -n "$INSTALL_BACKUP" && -e "$INSTALL_BACKUP" ]]; then
+    if [[ -e "$INSTALL_DESTINATION" || -L "$INSTALL_DESTINATION" ]]; then
+      if ! mv "$INSTALL_DESTINATION" "$failed"; then
+        return 1
+      fi
+    fi
+    if ! mv "$INSTALL_BACKUP" "$INSTALL_DESTINATION"; then
+      return 1
+    fi
+    INSTALL_BACKUP=""
+    return 0
+  fi
+
+  # There was no previous install. Do not leave a failed replacement at the
+  # destination; leave it in the staging directory for diagnosis instead.
+  if [[ -e "$INSTALL_DESTINATION" || -L "$INSTALL_DESTINATION" ]]; then
+    if ! mv "$INSTALL_DESTINATION" "$failed"; then
+      return 1
+    fi
+    # With no known previous app, preserve anything that was at the
+    # destination rather than deleting it as part of failure cleanup.
+    INSTALL_KEEP_STAGE=1
+  fi
+  return 0
+}
+
+install_app() {
+  local source="$1"
+  local root="${INSTALL_ROOT:-/Applications}"
+  local destination staged_app
+  local source_team expected_team existing_team
+
+  if [[ "$root" != /* ]]; then
+    install_die "INSTALL_ROOT must be an absolute path"
+  fi
+  if [[ ! -d "$root" ]]; then
+    install_die "Install root does not exist: $root"
+  fi
+  if ! root="$(cd -P "$root" && pwd -P)"; then
+    install_die "Could not resolve install root: $root"
+  fi
+  destination="$root/Tajpo.app"
+  INSTALL_DESTINATION="$destination"
+  expected_team="${EXPECTED_TEAM_ID:-}"
+
+  # Validate the newly built bundle before touching the destination.
+  verify_app "$source" "source app" || install_die "Refusing to install an unverified app"
+  source_team="$SIGNATURE_TEAM"
+  if [[ -n "$expected_team" && "$source_team" != "$expected_team" ]]; then
+    install_die "Source signature team '${source_team:-ad hoc}' does not match EXPECTED_TEAM_ID '$expected_team'"
+  fi
+
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    if [[ ! -d "$destination" || -L "$destination" ]]; then
+      install_die "Refusing to replace non-directory destination: $destination"
+    fi
+    verify_app "$destination" "existing app" || install_die "Refusing to replace an unverified existing app"
+    existing_team="$SIGNATURE_TEAM"
+    if [[ "$source_team" != "$existing_team" ]]; then
+      install_die "Refusing to replace an app signed by '${existing_team:-ad hoc}' with '${source_team:-ad hoc}'"
+    fi
+  fi
+
+  # Stage on the destination volume so both moves are renames, not copies.
+  # This also means a failed verification never damages the existing app.
+  INSTALL_STAGE="$(mktemp -d "$root/.tajpo-install.XXXXXX")"
+  staged_app="$INSTALL_STAGE/Tajpo.app"
+  ditto --rsrc --extattr "$source" "$staged_app"
+  verify_app "$staged_app" "staged app" || install_die "Staged app failed verification"
+
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    INSTALL_BACKUP="$INSTALL_STAGE/previous.app"
+    mv "$destination" "$INSTALL_BACKUP" || install_die "Could not move the existing app aside"
+  fi
+
+  if ! mv "$staged_app" "$destination"; then
+    if ! restore_previous_install; then
+      INSTALL_KEEP_STAGE=1
+      install_die "Could not install the app or restore the previous copy; rollback data is in $INSTALL_STAGE"
+    fi
+    install_die "Could not move the verified app into $destination"
+  fi
+
+  if ! verify_app "$destination" "installed app"; then
+    if ! restore_previous_install; then
+      INSTALL_KEEP_STAGE=1
+      install_die "Installed app failed verification and rollback failed; rollback data is in $INSTALL_STAGE"
+    fi
+    install_die "Installed app failed verification; the previous copy was restored"
+  fi
+  INSTALL_COMMITTED=1
+
+  echo "==> Installed verified $destination"
+  if ! open -n "$destination"; then
+    echo "The app was installed but could not be opened; open it from $destination" >&2
+  fi
+}
+
 if [[ "$INSTALL" == "1" ]]; then
-  echo "==> Installing to /Applications"
-  pkill -x Tajpo 2>/dev/null || true
-  rm -rf /Applications/Tajpo.app
-  cp -R "$APP" /Applications/
-  open /Applications/Tajpo.app
+  install_app "$APP"
 fi
 
 echo "==> Done: $APP"

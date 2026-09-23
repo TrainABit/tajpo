@@ -569,7 +569,7 @@ struct OnboardingView: View {
                         Text(loginMessage).font(.caption).foregroundStyle(.orange)
                     }
                 } else if AppLocation.isTemporary {
-                    Label("Tajpo is running from a temporary location. Move it to Applications so it can start at login.", systemImage: "folder")
+                    Label("Tajpo is running from a temporary location. Drag it from Finder into Applications so it can start at login.", systemImage: "folder")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
