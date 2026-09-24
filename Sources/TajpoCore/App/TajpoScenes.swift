@@ -3,7 +3,9 @@ import SwiftUI
 
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let shouldShowSetup = CommandLine.arguments.contains("-TajpoSetup")
+            || !UserDefaults.standard.bool(forKey: "completedOnboarding")
+        NSApp.setActivationPolicy(shouldShowSetup ? .regular : .accessory)
     }
 }
 
