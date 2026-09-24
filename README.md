@@ -57,7 +57,7 @@ scripts/build-app.sh --dmg
 
 ## How it works
 
-- **Reading the selection.** Tajpo reads it through the Accessibility API. Apps that don't support that (some Electron and cross-platform apps) are handled with a synthetic ⌘C. The clipboard is restored afterwards. The replacement item is marked for clipboard managers; the source app creates the temporary original, so a clipboard manager may see that brief copy before Tajpo can mark it.
+- **Reading the selection.** Tajpo reads it through the Accessibility API. Apps that don't support that (some Electron and cross-platform apps) are handled with a synthetic ⌘C. The clipboard is restored afterwards. The temporary copy is marked for clipboard managers; the source app creates it, so a clipboard manager may see that brief copy before Tajpo can mark it.
 - **Replacing text.** Replace writes through Accessibility and checks the result. If the focus changed, the selection is no longer available, or the target is a terminal/rich clipboard capture, it offers Copy instead of sending a synthetic paste to an app it cannot verify.
 - **Streaming.** The OpenAI Chat Completions response streams in. If the model stops because of its length limit or a content filter, Replace is disabled so your text is never swapped for a cut-off version.
 - **What gets sent.** The selected text goes to the model inside delimiters, with instructions to edit it rather than reply to it.
