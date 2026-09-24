@@ -1,12 +1,14 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
-final class OnboardingController {
+final class OnboardingController: NSObject, NSWindowDelegate {
     static let shared = OnboardingController()
     private var window: NSWindow?
 
     func show(model: AppModel) {
+        NSApp.setActivationPolicy(.regular)
         if let window, window.isVisible {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -32,11 +34,19 @@ final class OnboardingController {
         window.isMovableByWindowBackground = false
         window.minSize = size
         window.setFrameAutosaveName("TajpoFieldTestWindow")
+        window.delegate = self
         window.contentView = NSHostingView(rootView: view)
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        if let closedWindow = notification.object as? NSWindow, closedWindow === window {
+            window = nil
+        }
     }
 }
 
@@ -159,6 +169,9 @@ private struct OnboardingView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .tint(TajpoTheme.copper)
         .onAppear { model.refreshSystemState() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshSystemState()
+        }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: step)
     }
 
@@ -297,9 +310,22 @@ private struct OnboardingView: View {
             }
             .setupSurface()
             if !model.isAccessibilityTrusted {
-                Button("Open Accessibility Settings") { model.requestAccessibility() }
-                    .buttonStyle(.borderedProminent)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("macOS keeps this switch off until you turn it on. Turn on Tajpo in System Settings, then return here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Accessibility Settings") { model.requestAccessibility() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(TajpoTheme.copper)
+                    Button {
+                        model.refreshSystemState()
+                    } label: {
+                        Label("I turned it on — check again", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.link)
                     .tint(TajpoTheme.copper)
+                }
             }
         }
     }
