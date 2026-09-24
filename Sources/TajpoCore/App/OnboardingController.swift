@@ -455,12 +455,16 @@ private struct OnboardingView: View {
                 .buttonStyle(.link)
                 .tint(TajpoTheme.copper)
             }
-            Button(step == SetupStep.all.count - 1 ? "Finish" : step == 0 ? "Get Started" : "Continue") {
+            Button {
                 if step == SetupStep.all.count - 1 {
                     finish()
                 } else {
                     move(to: step + 1)
                 }
+            } label: {
+                Text(step == SetupStep.all.count - 1 ? "Finish" : step == 0 ? "Get Started" : "Continue")
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 90)
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)
