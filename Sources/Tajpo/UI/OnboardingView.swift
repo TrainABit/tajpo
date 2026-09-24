@@ -112,6 +112,7 @@ struct OnboardingView: View {
                 GeometryReader { proxy in
                     ScrollView {
                         content
+                            .frame(maxWidth: 700, alignment: .topLeading)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .padding(.bottom, 8)
                             // Short steps sit in the middle instead of leaving a gap above the buttons.
@@ -194,15 +195,15 @@ struct OnboardingView: View {
             Spacer()
             Label(step == .done ? (missingItems.isEmpty ? "All set" : "Almost there") : "About 3 minutes",
                   systemImage: step == .done && missingItems.isEmpty ? "checkmark.circle" : "clock")
-                .font(.callout)
+                .font(.caption)
                 .opacity(0.8)
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 26)
-        .frame(width: 236, alignment: .leading)
+        .frame(width: 224, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.white)
-        .background(Brand.gradient)
+        .background(Brand.sidebar)
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Setup step \(step.rawValue + 1) of \(OnboardingStep.allCases.count), \(step.label)")
@@ -862,14 +863,14 @@ private struct StepHeader: View {
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(RoundedRectangle(cornerRadius: 10).fill(tint.gradient))
+                .frame(width: 42, height: 42)
+                .background(RoundedRectangle(cornerRadius: 10).fill(tint))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .foregroundStyle(.secondary)
