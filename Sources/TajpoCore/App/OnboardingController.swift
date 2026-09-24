@@ -250,9 +250,11 @@ private struct OnboardingView: View {
                     Text(step == SetupStep.all.count - 1 ? "Finish setup" : step == 0 ? "Continue" : "Next")
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(TajpoTheme.copper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(TajpoTheme.copper)
+                .buttonStyle(.plain)
+                .opacity(canContinue ? 1 : 0.45)
                 .disabled(!canContinue)
             }
             .padding(24)
@@ -504,59 +506,12 @@ private struct LiveRewriteStage: View {
             .padding(.top, 22)
             .padding(.bottom, 14)
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 7) {
-                    Circle().fill(Color.red.opacity(0.75)).frame(width: 9, height: 9)
-                    Circle().fill(Color.yellow.opacity(0.75)).frame(width: 9, height: 9)
-                    Circle().fill(Color.green.opacity(0.75)).frame(width: 9, height: 9)
-                    Text("Draft — Untitled")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 6)
-                    Spacer()
-                    Text("Tajpo can see this selection")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 13)
+            Spacer(minLength: 4)
 
-                Divider()
+            documentCard
+                .padding(.horizontal, 24)
 
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text("Their going to the ")
-                        Text("libary")
-                            .foregroundStyle(TajpoTheme.terracotta)
-                            .underline(true, color: TajpoTheme.terracotta)
-                        Text(" tomorow.")
-                    }
-                    .font(.system(size: 21, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 26)
-
-                    HStack(spacing: 8) {
-                        Image(systemName: "selection.pin.in.out")
-                            .foregroundStyle(TajpoTheme.copper)
-                        Text("Selected text only")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 24)
-
-                    Spacer(minLength: 8)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                commandBar
-                    .padding(18)
-            }
-            .background(Color(nsColor: .textBackgroundColor).opacity(0.68), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.10), lineWidth: 1))
-            .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 22)
+            Spacer(minLength: 4)
 
             HStack(spacing: 8) {
                 Image(systemName: "lock.shield")
@@ -573,13 +528,16 @@ private struct LiveRewriteStage: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 18)
         }
-        .background(
-            LinearGradient(
-                colors: [Color.primary.opacity(0.035), Color.primary.opacity(0.012)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.primary.opacity(0.035), Color.primary.opacity(0.012)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                StageGrid()
+            }
+        }
         .onReceive(timer) { _ in
             guard !reduceMotion else { return }
             let currentIndex = DemoAction.allCases.firstIndex(of: action) ?? 0
@@ -590,6 +548,58 @@ private struct LiveRewriteStage: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var documentCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Circle().fill(Color.red.opacity(0.75)).frame(width: 9, height: 9)
+                Circle().fill(Color.yellow.opacity(0.75)).frame(width: 9, height: 9)
+                Circle().fill(Color.green.opacity(0.75)).frame(width: 9, height: 9)
+                Text("Draft — Untitled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 6)
+                Spacer()
+                Text("Tajpo can see this selection")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 13)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("Their going to the ")
+                    Text("libary")
+                        .foregroundStyle(TajpoTheme.terracotta)
+                        .underline(true, color: TajpoTheme.terracotta)
+                    Text(" tomorow.")
+                }
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+
+                HStack(spacing: 8) {
+                    Image(systemName: "selection.pin.in.out")
+                        .foregroundStyle(TajpoTheme.copper)
+                    Text("Selected text only")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 24)
+            }
+            .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 170, alignment: .top)
+
+            commandBar
+                .padding(18)
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.68), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.10), lineWidth: 1))
+        .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
     }
 
     private var commandBar: some View {
@@ -649,6 +659,29 @@ private struct LiveRewriteStage: View {
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(TajpoTheme.copper.opacity(0.22), lineWidth: 1))
+    }
+}
+
+private struct StageGrid: View {
+    var body: some View {
+        Canvas { context, size in
+            let step: CGFloat = 32
+            var path = Path()
+            var x: CGFloat = 0
+            while x <= size.width {
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                x += step
+            }
+            var y: CGFloat = 0
+            while y <= size.height {
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                y += step
+            }
+            context.stroke(path, with: .color(.primary.opacity(0.035)), lineWidth: 0.5)
+        }
+        .allowsHitTesting(false)
     }
 }
 
