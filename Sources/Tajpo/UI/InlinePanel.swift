@@ -27,8 +27,8 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
     private var isPlacing = false
 
     private static let widthKey = "panelWidth"
-    static let minimumWidth: CGFloat = 520
-    static let defaultWidth: CGFloat = 580
+    static let minimumWidth: CGFloat = 560
+    static let defaultWidth: CGFloat = 620
 
     func show(model: AppModel, near selection: CGRect?, sourceName: String? = nil, sourceIcon: NSImage? = nil) {
         model.session.sourceName = sourceName
@@ -46,11 +46,6 @@ final class InlinePanelController: NSObject, NSWindowDelegate {
         // ring on the instruction field would be the loudest thing on screen.
         panel.makeFirstResponder(nil)
         installClickMonitor()
-    }
-
-    /// Hides the panel so a synthetic paste reaches the source app.
-    func hide() {
-        panel?.orderOut(nil)
     }
 
     func reshow() {
@@ -204,9 +199,9 @@ struct InlineRewriteView: View {
     ]
 
     /// Result area limits; longer results scroll.
-    private static let resultMinHeight: CGFloat = 44
+    private static let resultMinHeight: CGFloat = 72
     private static var resultMaxHeight: CGFloat {
-        min(420, (NSScreen.main?.visibleFrame.height ?? 800) * 0.5)
+        min(360, (NSScreen.main?.visibleFrame.height ?? 800) * 0.46)
     }
 
     init(model: AppModel, session: RewriteSession, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
@@ -218,26 +213,31 @@ struct InlineRewriteView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             header
+                .padding(.bottom, 12)
+            Divider().overlay(Color.primary.opacity(0.10))
             Group {
                 if let capture = session.capture {
                     content(capture)
                 } else if let error = session.error {
                     errorState(error)
                 } else {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         ProgressView().controlSize(.small)
-                        Text("Reading the selection…").foregroundStyle(.secondary)
+                        Text("Reading the selection…")
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
+                    .padding(.vertical, 28)
                 }
             }
+            .padding(.top, 14)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 5)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.97))
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             onHeightChange(height)
@@ -252,14 +252,24 @@ struct InlineRewriteView: View {
 
     /// Sits in the transparent title bar, next to the close button.
     private var header: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .center, spacing: 10) {
             Image(nsImage: session.sourceIcon ?? NSApp.applicationIconImage)
                 .resizable()
-                .frame(width: 16, height: 16)
+                .frame(width: 20, height: 20)
                 .accessibilityHidden(true)
-            Text(session.sourceName ?? "Tajpo")
-                .font(.callout.weight(.semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.sourceName ?? "Tajpo")
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(statusLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer(minLength: 8)
             if session.capture != nil {
                 presetMenu
@@ -267,7 +277,28 @@ struct InlineRewriteView: View {
             }
         }
         .padding(.leading, 20)
-        .frame(height: 18)
+        .padding(.trailing, 4)
+        .frame(minHeight: 32)
+    }
+
+    private var statusLabel: String {
+        if session.error != nil { return "Needs attention" }
+        return switch session.phase {
+        case .capturing: "Reading selection"
+        case .ready: "Selected text"
+        case .running: "Working"
+        case .finished: "Result ready"
+        case .failed: "Needs attention"
+        }
+    }
+
+    private var statusColor: Color {
+        if session.error != nil { return .orange }
+        return switch session.phase {
+        case .capturing, .running: Brand.accent
+        case .ready, .finished: .green
+        case .failed: .orange
+        }
     }
 
     // MARK: States
@@ -300,7 +331,7 @@ struct InlineRewriteView: View {
     }
 
     private func content(_ capture: TextCapture) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             OriginalTextView(text: capture.text)
             if let blocker = capture.replaceBlocker {
                 Callout(symbol: "doc.on.clipboard", tint: .secondary,
@@ -331,10 +362,14 @@ struct InlineRewriteView: View {
                 }
             } label: {
                 Label("Tone", systemImage: Self.symbol(for: .changeTone))
-            } primaryAction: {
-                model.run(.changeTone)
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .fill(session.action == .changeTone ? Brand.accent : Color.primary.opacity(0.055)))
+                    .foregroundStyle(session.action == .changeTone ? .white : .primary)
             }
-            .menuStyle(.button)
+            .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Change Tone to \(session.tone.title) (⌘5). Click the arrow to pick another tone.")
             .accessibilityAddTraits(session.action == .changeTone ? .isSelected : [])
@@ -346,24 +381,20 @@ struct InlineRewriteView: View {
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
         }
-        .controlSize(.large)
+        .controlSize(.regular)
         .disabled(!session.canRun)
     }
 
     @ViewBuilder
     private func actionButton(_ action: RewriteAction) -> some View {
-        let button = Button { model.run(action) } label: {
+        Button { model.run(action) } label: {
             Label(action.title, systemImage: Self.symbol(for: action))
         }
+        .buttonStyle(PanelActionButtonStyle(selected: session.action == action))
         .keyboardShortcut(KeyEquivalent(Character(String(action.shortcutNumber))), modifiers: .command)
         .fixedSize()
         .help("\(action.title) (⌘\(action.shortcutNumber))")
         .accessibilityAddTraits(session.action == action ? .isSelected : [])
-        if session.action == action {
-            button.buttonStyle(.borderedProminent)
-        } else {
-            button.buttonStyle(.bordered)
-        }
     }
 
     static func symbol(for action: RewriteAction) -> String {
@@ -399,12 +430,14 @@ struct InlineRewriteView: View {
     }
 
     private var instructionRow: some View {
-        HStack(spacing: 6) {
-            TextField("Or tell Tajpo what to do, e.g. “make it a bullet list”", text: $session.instruction)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.large)
+        HStack(spacing: 8) {
+            Image(systemName: "text.bubble")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Describe an edit…", text: $session.instruction)
+                .textFieldStyle(.plain)
+                .font(.body)
                 .focused($instructionFocused)
-                // Typing still goes here, but the ring shouldn't be the loudest thing on open.
                 .focusEffectDisabled()
                 .onSubmit { model.run(.custom) }
                 .accessibilityLabel("Custom instruction")
@@ -430,12 +463,17 @@ struct InlineRewriteView: View {
             .help("Recent and suggested instructions")
             .accessibilityLabel("Instruction suggestions")
             Button { model.run(.custom) } label: {
-                ShortcutLabel(title: "Go", keys: "⌘6")
+                Text("Go")
+                    .fontWeight(.semibold)
             }
-            .controlSize(.large)
+            .buttonStyle(.borderedProminent)
             .keyboardShortcut("6", modifiers: .command)
-            .buttonStyle(.bordered)
+            .help("Run custom instruction (⌘6)")
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.045)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
         .disabled(!session.canRun)
         .onChange(of: session.focusInstruction) { _, focus in
             if focus {
@@ -449,38 +487,38 @@ struct InlineRewriteView: View {
 
     private var output: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 if session.isRunning {
                     ProgressView().controlSize(.small)
-                    Text(runningTitle).foregroundStyle(.secondary)
+                    Text(runningTitle)
+                        .font(.headline.weight(.medium))
                     Spacer()
                     Button("Stop") { model.stop() }
                         .keyboardShortcut(".", modifiers: .command)
                         .controlSize(.small)
                 } else {
-                    Text(outputTitle)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-                    if let stats = resultStats {
-                        Text(stats)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(outputTitle)
+                            .font(.headline.weight(.semibold))
+                        if let stats = resultStats {
+                            Text(stats)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     if session.diff != nil {
                         Toggle("Show changes", isOn: $session.showChanges)
                             .toggleStyle(.checkbox)
+                            .font(.caption)
                     }
                 }
             }
-            .font(.callout)
-            .frame(height: 22)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
 
-            Divider().opacity(0.6)
+            Divider().overlay(Color.primary.opacity(0.10))
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -491,7 +529,8 @@ struct InlineRewriteView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Color.clear.frame(height: 1).id("end")
                     }
-                    .padding(10)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         resultHeight = height
                     }
@@ -508,32 +547,51 @@ struct InlineRewriteView: View {
                 }
             }
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Brand.accent.opacity(0.16)))
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
     }
 
     @ViewBuilder
     private var outputText: some View {
         if session.showChanges, let diff = session.diff {
             Text(Self.attributed(diff))
-                .lineSpacing(2)
+                .font(.body)
+                .lineSpacing(3)
                 .accessibilityLabel(Text(session.result ?? ""))
                 .accessibilityValue("\(diff.filter { $0.kind != .same }.count) changes")
         } else if !session.preview.isEmpty {
             Text(session.preview)
-                .lineSpacing(2)
+                .font(.body)
+                .lineSpacing(3)
         } else if session.isRunning, let capture = session.capture {
             // Skeleton until the first words arrive.
             Text(capture.text.prefix(300))
+                .font(.body)
+                .lineSpacing(3)
                 .redacted(reason: .placeholder)
                 .accessibilityHidden(true)
         } else {
-            Text(session.phase == .ready
-                 ? "Choose an action or type an instruction. Nothing changes in your text until you press Replace."
-                 : " ")
-                .foregroundStyle(.secondary)
+            emptyOutput
         }
+    }
+
+    private var emptyOutput: some View {
+        VStack(spacing: 7) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Brand.accent)
+            Text("Your result will appear here")
+                .font(.headline)
+            Text("Choose an action or describe an edit. Nothing changes until you press Replace.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .padding(.vertical, 4)
     }
 
     private var runningTitle: String {
@@ -591,32 +649,47 @@ struct InlineRewriteView: View {
     }
 
     private func footer(_ capture: TextCapture) -> some View {
-        HStack(spacing: 8) {
-            Button { model.retry() } label: { ShortcutLabel(title: "Retry", keys: "⌘R") }
+        VStack(spacing: 10) {
+            Divider().overlay(Color.primary.opacity(0.10))
+            HStack(spacing: 8) {
+                Button { model.retry() } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
                 .keyboardShortcut("r", modifiers: .command)
+                .help("Retry (⌘R)")
                 .disabled(session.action == nil || !session.canRun)
-            Spacer()
-            // Esc stops a running request first; a second Esc closes.
-            Button(session.isRunning ? "Stop" : "Close") {
-                if session.isRunning { model.stop() } else { model.closePanel() }
-            }
-            .keyboardShortcut(.cancelAction)
-            if capture.canReplace {
-                Button { model.copyResult() } label: { ShortcutLabel(title: "Copy", keys: "⇧⌘C") }
+                Spacer()
+                // Esc stops a running request first; a second Esc closes.
+                Button(session.isRunning ? "Stop" : "Close") {
+                    if session.isRunning { model.stop() } else { model.closePanel() }
+                }
+                .keyboardShortcut(.cancelAction)
+                if capture.canReplace {
+                    Button { model.copyResult() } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .help("Copy result (⇧⌘C)")
                     .disabled(session.copyableText == nil || session.isRunning)
-                Button { model.replace() } label: { ShortcutLabel(title: "Replace", keys: "⌘↩", prominent: true) }
+                    Button { model.replace() } label: {
+                        Label("Replace", systemImage: "arrow.uturn.backward")
+                    }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .help("Replace selected text (⌘↩)")
                     .disabled(!session.canReplace)
-            } else {
-                Button { model.copyResult(closeAfter: true) } label: { ShortcutLabel(title: "Copy", keys: "⌘↩", prominent: true) }
+                } else {
+                    Button { model.copyResult(closeAfter: true) } label: {
+                        Label("Copy result", systemImage: "doc.on.doc")
+                    }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .help("Copy result and close (⌘↩)")
                     .disabled(session.copyableText == nil || session.isRunning)
+                }
             }
+            .controlSize(.regular)
         }
-        .controlSize(.large)
     }
 
     private func announce(_ phase: RewriteSession.Phase) {
@@ -691,20 +764,25 @@ struct InlineRewriteView: View {
     }
 }
 
-/// Button title with its keyboard shortcut shown inline.
-private struct ShortcutLabel: View {
-    let title: String
-    let keys: String
-    var prominent = false
+private struct PanelActionButtonStyle: ButtonStyle {
+    let selected: Bool
 
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(title)
-            Text(keys)
-                .font(.caption.monospaced())
-                .foregroundStyle(prominent ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(.secondary))
-                .accessibilityHidden(true)
-        }
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selected ? Brand.accent : Color.primary.opacity(configuration.isPressed ? 0.12 : 0.055))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? Color.clear : Color.primary.opacity(0.08))
+            )
+            .opacity(configuration.isEnabled ? 1 : 0.45)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -716,17 +794,21 @@ private struct Callout<Accessory: View>: View {
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: symbol).foregroundStyle(tint)
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 18, height: 20)
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             accessory()
         }
         .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(0.12)))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(tint.opacity(0.18)))
     }
 }
 
@@ -779,8 +861,9 @@ private struct OriginalTextView: View {
                 .frame(maxHeight: 110)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.035)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.07)))
     }
 }
