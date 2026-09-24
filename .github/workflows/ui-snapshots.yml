@@ -1,18 +1,19 @@
 name: UI snapshots
 
 # Launches the real app on a macOS runner, checks it survives first launch,
-# and captures every screen (light and dark) via `-TajpoDemo <scene>`.
-# The images are pushed to the `ci-snapshots` branch for review.
+# and captures every screen via -TajpoDemo. Images are review artifacts, not a
+# force-pushed branch.
 on:
   workflow_dispatch:
+  pull_request:
   push:
-    branches: ['claude/**']
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: ui-snapshots-${{ github.ref }}
+  group: ui-snapshots-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,49 +21,54 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Build Tajpo.app
-        run: UNIVERSAL=0 scripts/build-app.sh
+      - name: Build isolated snapshot app
+        run: BUNDLE_ID=com.trainabit.tajpo.snapshot UNIVERSAL=0 scripts/build-app.sh
 
       - name: First-launch smoke test
         run: |
-          defaults delete com.trainabit.tajpo 2>/dev/null || true
+          set -euo pipefail
+          defaults delete com.trainabit.tajpo.snapshot 2>/dev/null || true
+          rm -rf snapshots
           mkdir -p snapshots
+          touch "$RUNNER_TEMP/tajpo-smoke-start"
           open build/Tajpo.app
-          sleep 10
+          for _ in {1..100}; do
+            pgrep -x Tajpo >/dev/null && break
+            sleep 0.1
+          done
           if ! pgrep -x Tajpo >/dev/null; then
-            echo "::error::Tajpo is not running 10 s after launch"
-            ls -la ~/Library/Logs/DiagnosticReports/ || true
-            cat ~/Library/Logs/DiagnosticReports/Tajpo*.ips 2>/dev/null | head -200 || true
+            echo "::error::Tajpo is not running after first launch"
             exit 1
           fi
           screencapture -x snapshots/00-first-launch.png
+          test -s snapshots/00-first-launch.png
           pkill -x Tajpo || true
-          sleep 2
+          sleep 1
 
       - name: Capture scenes
-        run: scripts/capture-snapshots.sh
+        run: TAJPO_SNAPSHOT_BUNDLE_ID=com.trainabit.tajpo.snapshot scripts/capture-snapshots.sh
 
-      - name: Fail on crash reports
+      - name: Fail on new crash reports
         run: |
-          if ls ~/Library/Logs/DiagnosticReports/Tajpo* 2>/dev/null; then
-            cat ~/Library/Logs/DiagnosticReports/Tajpo*.ips | head -300
+          set -euo pipefail
+          reports=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'Tajpo*.ips' -newer "$RUNNER_TEMP/tajpo-smoke-start" -print 2>/dev/null || true)
+          if [[ -n "$reports" ]]; then
+            printf '%s\n' "$reports"
+            cat $reports | head -300
             echo "::error::Tajpo crashed while capturing scenes"
             exit 1
           fi
 
-      - name: Publish to the ci-snapshots branch
+      - name: Upload snapshots
         if: always()
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          cd snapshots
-          printf "Source: %s @ %s\n" "$GITHUB_REF_NAME" "$GITHUB_SHA" > README.md
-          git init -q
-          git checkout -q -b ci-snapshots
-          git add -A
-          git -c user.name="tajpo-ci" -c user.email="ci@users.noreply.github.com" commit -q -m "Snapshots for $GITHUB_SHA"
-          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-snapshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tajpo-ui-snapshots-${{ github.run_id }}
+          path: snapshots/
+          if-no-files-found: error
+          retention-days: 14

@@ -8,9 +8,9 @@ Tajpo is a macOS app that edits text you select. It has no servers, no accounts,
 
 - **The text you select, only when you choose an action** (Correct, Improve, a custom instruction, and so on), together with the instructions for that action. It goes directly from your Mac to the AI server set in Settings ▸ AI Provider:
   - **OpenAI (default).** You use your own OpenAI API key and are OpenAI's customer. OpenAI's own terms and privacy policy apply to that data. See [how OpenAI handles API data](https://platform.openai.com/docs/guides/your-data).
-  - **Another server you configure**, for example Ollama or LM Studio running on your Mac. Text then goes only to that server.
-- **Update checks.** If you turn on weekly update checks, or choose Check for Updates… in the menu, Tajpo asks GitHub's public API for the latest release number of Tajpo. The request includes nothing about you or your text; GitHub sees your IP address, as with any web request.
-- **Nothing else is sent.** Opening the panel sends nothing, and nothing is sent in the background.
+  - **Another server you configure**, for example Ollama or LM Studio running on your Mac. Text then goes only to that server. The OpenAI key is not loaded or sent to a custom server.
+- **Update checks.** If you turn on weekly update checks, or choose Check for Updates… in the menu, Tajpo asks GitHub's public API for the latest release number of Tajpo. The request does not contain your text, key, or app identifier; GitHub still receives ordinary network metadata such as your IP address.
+- **Nothing else is sent.** Opening the panel sends nothing. Demo scenes are offline. The only optional background request is the update check described above.
 
 ## What Tajpo stores on your Mac
 
@@ -21,7 +21,7 @@ Tajpo is a macOS app that edits text you select. It has no servers, no accounts,
 ## Permissions
 
 - **Accessibility.** Tajpo uses this to read the text you select and to put the result back, only when you press Tajpo's shortcut or use its menu. It does not record keystrokes, read your screen, or read other windows, and it refuses to read password fields.
-- **Clipboard.** Some apps don't support Accessibility. There, Tajpo briefly uses the clipboard to copy the selection or paste the result, then restores what you had. Tajpo marks these temporary items so clipboard managers skip them.
+- **Clipboard.** Some apps don't support Accessibility. There, Tajpo briefly uses the clipboard to copy the selection or paste the result, then restores what you had. The replacement item is marked for clipboard managers; the original item was created by the source app, so a clipboard manager may see that brief copy before Tajpo can mark it.
 
 ## Contact
 

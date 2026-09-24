@@ -161,7 +161,10 @@ if [[ "$MAKE_DMG" == "1" ]]; then
     xcrun stapler staple "$DMG"
     spctl -a -vvv -t open --context context:primary-signature "$DMG"
   fi
-  shasum -a 256 "$DMG" | tee "$DMG.sha256"
+  # Keep the checksum portable: release consumers run `shasum -c` from the
+  # directory containing the DMG, not from the GitHub runner's filesystem.
+  (cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")" | tee "$(basename "$DMG").sha256")
+  hdiutil verify "$DMG"
 fi
 
 INSTALL_STAGE=""
@@ -377,9 +380,7 @@ install_app() {
   INSTALL_COMMITTED=1
 
   echo "==> Installed verified $destination"
-  if ! open -n "$destination"; then
-    echo "The app was installed but could not be opened; open it from $destination" >&2
-  fi
+  echo "Quit any running Tajpo instance, then open the installed app from $destination."
 }
 
 if [[ "$INSTALL" == "1" ]]; then

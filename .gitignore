@@ -13,3 +13,6 @@ DerivedData/
 *.p8
 AuthKey_*.p8
 *.dSYM.zip
+snapshots/
+__pycache__/
+*.pyc
