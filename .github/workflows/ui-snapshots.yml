@@ -1,0 +1,64 @@
+name: UI snapshots
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ui-snapshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshots:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build Tajpo.app
+        run: UNIVERSAL=0 scripts/build-app.sh
+
+      - name: First-launch smoke test
+        run: |
+          defaults delete com.trainabit.tajpo 2>/dev/null || true
+          mkdir -p snapshots
+          open build/Tajpo.app
+          sleep 10
+          if ! pgrep -x Tajpo >/dev/null; then
+            echo "::error::Tajpo is not running 10 s after launch"
+            ls -la ~/Library/Logs/DiagnosticReports/ || true
+            cat ~/Library/Logs/DiagnosticReports/Tajpo*.ips 2>/dev/null | head -200 || true
+            exit 1
+          fi
+          screencapture -x snapshots/00-first-launch.png
+          pkill -x Tajpo || true
+          sleep 2
+
+      - name: Capture scenes
+        run: scripts/capture-snapshots.sh
+
+      - name: Fail on crash reports
+        run: |
+          if ls ~/Library/Logs/DiagnosticReports/Tajpo* 2>/dev/null; then
+            cat ~/Library/Logs/DiagnosticReports/Tajpo*.ips | head -300
+            echo "::error::Tajpo crashed while capturing scenes"
+            exit 1
+          fi
+
+      - name: Publish to the ci-snapshots branch
+        if: always()
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          cd snapshots
+          printf "Source: %s @ %s\n" "$GITHUB_REF_NAME" "$GITHUB_SHA" > README.md
+          git init -q
+          git checkout -q -b ci-snapshots
+          git add -A
+          git -c user.name="tajpo-ci" -c user.email="ci@users.noreply.github.com" commit -q -m "Snapshots for $GITHUB_SHA"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-snapshots
