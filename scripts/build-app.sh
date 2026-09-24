@@ -11,7 +11,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Tajpo" "$APP/Contents/MacOS/Tajpo"
 cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.trainabit.tajpo' "$APP/Contents/Info.plist"
-RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 4 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+if [[ ! -d "$RESOURCE_BUNDLE/Contents" ]]; then
+  # Some Swift toolchains place the bundle in a sibling build directory.
+  RESOURCE_BUNDLE="$(find "$ROOT/.build" -type d -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+fi
 if [[ -n "$RESOURCE_BUNDLE" && -d "$RESOURCE_BUNDLE/Contents" ]]; then
   RESOURCE_DEST="$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
   rm -rf "$RESOURCE_DEST"
