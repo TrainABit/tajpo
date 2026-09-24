@@ -22,7 +22,7 @@ public enum DemoLexiconLoader {
     }
 
     private static let fallback = DemoLexicon(
-        typos: ["teh": "the", "dont": "don't", "im": "I'm"],
+        typos: ["teh": "the", "dont": "don't", "im": "I'm", "enviroment": "environment"],
         filler: ["just", "really", "very", "actually"],
         hedges: ["I think", "maybe", "perhaps"],
         wordy: ["in order to": "to", "due to the fact that": "because"],
@@ -46,11 +46,26 @@ public enum DemoLexiconLoader {
             Bundle(for: DemoLexiconBundleMarker.self).bundleURL
         ]
         roots.append(contentsOf: Bundle.allBundles.flatMap { [$0.resourceURL, $0.bundleURL] })
+        if let override = ProcessInfo.processInfo.environment["PACKAGE_RESOURCE_BUNDLE_PATH"]
+            ?? ProcessInfo.processInfo.environment["PACKAGE_RESOURCE_BUNDLE_URL"] {
+            roots.append(URL(fileURLWithPath: override))
+        }
+        let mainURL = Bundle.main.bundleURL
+        roots.append(mainURL.deletingLastPathComponent())
+        roots.append(mainURL.deletingLastPathComponent().deletingLastPathComponent())
+        roots.append(URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
 
         var candidates: [URL] = []
         for root in roots.compactMap({ $0 }) {
             candidates.append(root.appendingPathComponent(bundleName))
             candidates.append(root.appendingPathComponent("Contents/Resources/\(bundleName)"))
+        }
+
+        // A direct resource is a safe last-resort layout for small ad-hoc
+        // preview apps and still avoids touching the fatal Bundle.module path.
+        for root in roots.compactMap({ $0 }) {
+            let direct = root.appendingPathComponent("demo-lexicon.json")
+            if fileManager.fileExists(atPath: direct.path) { return direct }
         }
 
         for candidate in candidates {
