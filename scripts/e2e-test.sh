@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/build/Tajpo.app"
+APP="${TAJPO_E2E_APP:-$ROOT/build/Tajpo.app}"
 OUT="$ROOT/snapshots"
 WORK="$(mktemp -d)"
 mkdir -p "$OUT"
@@ -17,8 +17,9 @@ fail() {
 }
 
 if [[ ! -d "$APP" ]]; then
-  fail "Build Tajpo.app first with: BUNDLE_ID=com.trainabit.tajpo.e2e scripts/build-app.sh"
+  fail "Build Tajpo.app first with: BUNDLE_ID=com.trainabit.tajpo.e2e scripts/build-app.sh (or set TAJPO_E2E_APP)"
 fi
+APP_BINARY="$APP/Contents/MacOS/Tajpo"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
 if [[ "$BUNDLE_ID" == "com.trainabit.tajpo" ]]; then
   fail "Refusing to run E2E against the production bundle; build with BUNDLE_ID=com.trainabit.tajpo.e2e"
@@ -39,6 +40,7 @@ cleanup() {
   if [[ -n "$TAJPO_PID" ]]; then
     kill "$TAJPO_PID" 2>/dev/null || true
   fi
+  pkill -f "$APP_BINARY" 2>/dev/null || true
   if [[ -n "$SERVER_PID" ]]; then
     kill "$SERVER_PID" 2>/dev/null || true
   fi
@@ -95,9 +97,12 @@ osascript -e 'tell application "TextEdit" to activate' -e 'delay 0.5' \
   -e 'tell application "System Events" to keystroke "a" using command down' \
   >/dev/null 2>&1 || fail "could not select text (System Events needs Accessibility)"
 
+# A previous manual attempt may have left a menu-bar instance running. It
+# must not be allowed to display a stale panel or intercept the hotkey.
+pkill -f "$APP_BINARY" 2>/dev/null || true
 open -n "$APP"
 for _ in {1..100}; do
-  TAJPO_PID="$(pgrep -n -f "$APP/Contents/MacOS/Tajpo" || true)"
+  TAJPO_PID="$(pgrep -n -f "$APP_BINARY" || true)"
   [[ -n "$TAJPO_PID" ]] && break
   sleep 0.1
 done
