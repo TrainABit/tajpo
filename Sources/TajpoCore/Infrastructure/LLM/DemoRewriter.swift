@@ -13,23 +13,79 @@ public struct DemoLexicon: Codable, Sendable, Equatable {
 
 public enum DemoLexiconLoader {
     public static func load() -> DemoLexicon {
-        if let url = Bundle.module.url(forResource: "demo-lexicon", withExtension: "json"),
+        if let url = resourceURL(),
            let data = try? Data(contentsOf: url),
            let lexicon = try? JSONDecoder().decode(DemoLexicon.self, from: data) {
             return lexicon
         }
-        return DemoLexicon(
-            typos: ["teh": "the", "dont": "don't", "im": "I'm"],
-            filler: ["just", "really", "very", "actually"],
-            hedges: ["I think", "maybe", "perhaps"],
-            wordy: ["in order to": "to", "due to the fact that": "because"],
-            simplify: ["utilize": "use", "commence": "start"],
-            expandContractions: ["don't": "do not", "I'm": "I am"],
-            addContractions: ["do not": "don't", "I am": "I'm"],
-            casualSlang: ["gonna": "going to"]
-        )
+        return fallback
+    }
+
+    private static let fallback = DemoLexicon(
+        typos: ["teh": "the", "dont": "don't", "im": "I'm", "enviroment": "environment"],
+        filler: ["just", "really", "very", "actually"],
+        hedges: ["I think", "maybe", "perhaps"],
+        wordy: ["in order to": "to", "due to the fact that": "because"],
+        simplify: ["utilize": "use", "commence": "start"],
+        expandContractions: ["don't": "do not", "I'm": "I am"],
+        addContractions: ["do not": "don't", "I am": "I'm"],
+        casualSlang: ["gonna": "going to"]
+    )
+
+    /// Do not touch `Bundle.module` here. Its generated accessor calls
+    /// `fatalError` when a packaged app is missing the SwiftPM resource
+    /// bundle, which turns a recoverable demo fallback into a process crash.
+    /// Packaged builds can place the bundle at the app root or in Contents/Resources.
+    private static func resourceURL() -> URL? {
+        let fileManager = FileManager.default
+        let bundleName = "Tajpo_TajpoCore.bundle"
+        var roots: [URL?] = [
+            Bundle.main.resourceURL,
+            Bundle.main.bundleURL,
+            Bundle(for: DemoLexiconBundleMarker.self).resourceURL,
+            Bundle(for: DemoLexiconBundleMarker.self).bundleURL
+        ]
+        roots.append(contentsOf: Bundle.allBundles.flatMap { [$0.resourceURL, $0.bundleURL] })
+        if let override = ProcessInfo.processInfo.environment["PACKAGE_RESOURCE_BUNDLE_PATH"]
+            ?? ProcessInfo.processInfo.environment["PACKAGE_RESOURCE_BUNDLE_URL"] {
+            roots.append(URL(fileURLWithPath: override))
+        }
+        let mainURL = Bundle.main.bundleURL
+        roots.append(mainURL.deletingLastPathComponent())
+        roots.append(mainURL.deletingLastPathComponent().deletingLastPathComponent())
+        roots.append(URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+
+        var candidates: [URL] = []
+        for root in roots.compactMap({ $0 }) {
+            candidates.append(root.appendingPathComponent(bundleName))
+            candidates.append(root.appendingPathComponent("Contents/Resources/\(bundleName)"))
+        }
+
+        // A direct resource is a safe last-resort layout for small ad-hoc
+        // preview apps and still avoids touching the fatal Bundle.module path.
+        for root in roots.compactMap({ $0 }) {
+            let direct = root.appendingPathComponent("demo-lexicon.json")
+            if fileManager.fileExists(atPath: direct.path) { return direct }
+        }
+
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let resource = bundle.url(forResource: "demo-lexicon", withExtension: "json") {
+                return resource
+            }
+            for relativePath in [
+                "Contents/Resources/demo-lexicon.json",
+                "demo-lexicon.json"
+            ] {
+                let resource = candidate.appendingPathComponent(relativePath)
+                if fileManager.fileExists(atPath: resource.path) { return resource }
+            }
+        }
+        return nil
     }
 }
+
+private final class DemoLexiconBundleMarker {}
 
 public struct DemoRewriteExtras: Sendable, Equatable {
     public var length: RewriteLength
@@ -290,9 +346,108 @@ public struct DemoRewriter: Sendable {
         var result = text.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
         result = result.replacingOccurrences(of: #" *\n+ *"#, with: "\n", options: .regularExpression)
         result = result.replacingOccurrences(of: #" +([,.;:!?])"#, with: "$1", options: .regularExpression)
-        result = result.replacingOccurrences(of: #"([.!?])([A-Za-z])"#, with: "$1 $2", options: .regularExpression)
+        result = insertSentenceBreaks(result)
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Inserts a space after sentence-final punctuation directly followed by a
+    /// letter ("word.Next" -> "word. Next") while protecting common abbreviations
+    /// ("e.g.", "i.e.", "Dr.", "U.S."), domain-like tokens ("example.com") and
+    /// decimal or version numbers ("3.5", "v1.2a").
+    private func insertSentenceBreaks(_ text: String) -> String {
+        let characters = Array(text)
+        var result = ""
+        result.reserveCapacity(text.count)
+        for (index, character) in characters.enumerated() {
+            if character.isLetter, index > 0 {
+                let previous = characters[index - 1]
+                if previous == "." {
+                    if !isProtectedPeriod(in: characters, at: index - 1, beforeLetterAt: index) {
+                        result.append(" ")
+                    }
+                } else if previous == "!" || previous == "?" {
+                    result.append(" ")
+                }
+            }
+            result.append(character)
+        }
+        return result
+    }
+
+    private func isProtectedPeriod(in characters: [Character], at periodIndex: Int, beforeLetterAt letterIndex: Int) -> Bool {
+        let previous = periodIndex > 0 ? characters[periodIndex - 1] : nil
+        let next = characters[letterIndex]
+        // Decimal or version number: "3.5", "v1.2a".
+        if previous?.isNumber == true, next.isNumber {
+            return true
+        }
+        // Domain-like token: a lowercase dotted token whose final label is a
+        // short TLD-style suffix ("example.com", "files.archive.org").
+        if let previous, previous.isLetter, periodIndex >= 2 {
+            let parts = dottedToken(in: characters, containing: periodIndex)
+            let isDomainLike = parts.count >= 2
+                && parts.allSatisfy { !$0.isEmpty && $0 == $0.lowercased() }
+                && (parts.last?.count ?? 0) <= 4
+            if isDomainLike {
+                return true
+            }
+        }
+        // Common abbreviations such as "e.g.", "i.e.", "etc.", "vs.", "Dr.", "U.S.".
+        if isAbbreviationPeriod(in: characters, at: periodIndex, followedBy: next) {
+            return true
+        }
+        return false
+    }
+
+    /// Splits the surrounding word at periods: "files.archive.org" -> ["files", "archive", "org"].
+    private func dottedToken(in characters: [Character], containing periodIndex: Int) -> [String] {
+        var start = periodIndex
+        while start > 0, characters[start - 1].isLetter || characters[start - 1] == "." {
+            start -= 1
+        }
+        var end = periodIndex + 1
+        while end < characters.count, characters[end].isLetter || characters[end] == "." {
+            end += 1
+        }
+        return String(characters[start..<end])
+            .split(separator: ".", omittingEmptySubsequences: false)
+            .map(String.init)
+    }
+
+    private func isAbbreviationPeriod(in characters: [Character], at periodIndex: Int, followedBy next: Character) -> Bool {
+        // Multi-part initialisms: "e.g.", "i.e.", "U.S." - a letter, period,
+        // letter, period, followed by a letter or whitespace.
+        if periodIndex >= 2,
+           characters[periodIndex - 1].isLetter,
+           characters[periodIndex - 2] == ".",
+           periodIndex >= 3, characters[periodIndex - 3].isLetter {
+            return true
+        }
+        // The trailing period of an initialism is still protected when the next
+        // sentence begins: "…e.g. This continues."
+        if next.isWhitespace, periodIndex >= 2,
+           characters[periodIndex - 1].isLetter,
+           characters[periodIndex - 2] == "." {
+            return true
+        }
+        // Word abbreviations such as "etc.", "vs.", "Dr.", "Mr.", "Mrs.".
+        var start = periodIndex
+        while start > 0, characters[start - 1].isLetter {
+            start -= 1
+        }
+        guard start < periodIndex else { return false }
+        let stem = String(characters[start..<periodIndex]).lowercased()
+        guard Self.wordAbbreviations.contains(stem) else { return false }
+        // "etc. Next" ends a sentence; "etc. next" continues it. Single-letter
+        // stems ("a.m.") and lowercase continuations are never sentence breaks.
+        if stem.count == 1 { return true }
+        return next.isLowercase
+    }
+
+    private static let wordAbbreviations: Set<String> = [
+        "e", "i", "g", "u", "s", // components of e.g. / i.e. / U.S.
+        "etc", "vs", "dr", "mr", "mrs", "ms", "st", "jr", "sr", "prof", "inc", "ltd", "no", "approx", "dept", "est"
+    ]
 
     private func fixStandaloneI(_ text: String) -> String {
         guard let regex = try? NSRegularExpression(pattern: "\\bi\\b") else { return text }
@@ -301,20 +456,38 @@ public struct DemoRewriter: Sendable {
     }
 
     private func capitalizeSentences(_ text: String) -> String {
+        let characters = Array(text)
         var result = ""
         var capitalize = true
-        for character in text {
+        for (index, character) in characters.enumerated() {
             if capitalize, character.isLetter {
                 result.append(String(character).uppercased())
                 capitalize = false
             } else {
                 result.append(character)
                 if character == "." || character == "!" || character == "?" {
-                    capitalize = true
+                    capitalize = isSentenceFinalPunctuation(in: characters, at: index)
                 }
             }
         }
         return result
+    }
+
+    /// Punctuation only ends a sentence when it is at the end of the text or is
+    /// followed by whitespace, and is not part of a number ("version 3.5 is")
+    /// or an abbreviation ("e.g.", "Dr.").
+    private func isSentenceFinalPunctuation(in characters: [Character], at index: Int) -> Bool {
+        let character = characters[index]
+        if character == "." {
+            let previous = index > 0 ? characters[index - 1] : nil
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+            if let previous, previous.isNumber, let next, next.isNumber { return false }
+            if let previous, previous.isLetter, isAbbreviationPeriod(in: characters, at: index, followedBy: next ?? " ") {
+                return false
+            }
+        }
+        guard index + 1 < characters.count else { return true }
+        return characters[index + 1].isWhitespace
     }
 
     private func splitSentences(_ text: String) -> [String] {

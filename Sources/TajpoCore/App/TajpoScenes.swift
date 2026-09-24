@@ -3,7 +3,9 @@ import SwiftUI
 
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let shouldShowSetup = CommandLine.arguments.contains("-TajpoSetup")
+            || !UserDefaults.standard.bool(forKey: "completedOnboarding")
+        NSApp.setActivationPolicy(shouldShowSetup ? .regular : .accessory)
     }
 }
 
@@ -129,6 +131,11 @@ struct MenuBarView: View {
                     Task { await model.checkForUpdates(quiet: false) }
                 }
                 Spacer()
+                Button {
+                    model.openOnboarding()
+                } label: {
+                    Label("Setup Guide", systemImage: "sparkles")
+                }
                 SettingsLink {
                     Text("Settings")
                 }
