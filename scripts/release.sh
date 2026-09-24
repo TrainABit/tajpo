@@ -31,19 +31,27 @@ cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
 # DemoLexiconLoader also has a safe fallback, but keeping the bundle intact
 # makes the on-device demo deterministic and keeps release verification honest.
 RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
-if [[ -n "$RESOURCE_BUNDLE" ]]; then
-  rm -rf "$APP/Tajpo_TajpoCore.bundle" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
-  ditto "$RESOURCE_BUNDLE" "$APP/Tajpo_TajpoCore.bundle"
+if [[ -n "$RESOURCE_BUNDLE" && -d "$RESOURCE_BUNDLE/Contents" ]]; then
+  copy_resource_bundle() {
+    local destination="$1"
+    rm -rf "$destination"
+    mkdir -p "$destination"
+    # Copy Contents explicitly so a malformed/flat bundle cannot pass as a
+    # valid macOS resource bundle. The generated SwiftPM accessor requires
+    # Contents/Info.plist and Contents/Resources/*.
+    ditto "$RESOURCE_BUNDLE/Contents" "$destination/Contents"
+    [[ -f "$destination/Contents/Info.plist" ]]
+    [[ -f "$destination/Contents/Resources/demo-lexicon.json" ]]
+  }
+
+  copy_resource_bundle "$APP/Tajpo_TajpoCore.bundle"
   # Also keep a copy under Contents/Resources for tools that expect resources there.
-  ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
-  if [[ ! -f "$APP/Tajpo_TajpoCore.bundle/Contents/Resources/demo-lexicon.json" ]] \
-     || [[ ! -f "$APP/Contents/Resources/Tajpo_TajpoCore.bundle/Contents/Resources/demo-lexicon.json" ]]; then
-    echo "error: packaged Tajpo_TajpoCore.bundle is missing demo-lexicon.json." >&2
-    exit 1
-  fi
+  copy_resource_bundle "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
+  # A direct copy is a deliberate fallback for ad-hoc/local app launches.
+  cp "$ROOT/Sources/TajpoCore/Resources/demo-lexicon.json" "$APP/Contents/Resources/demo-lexicon.json"
   echo "Bundled resources: $(basename "$RESOURCE_BUNDLE") (app root + Contents/Resources)"
 else
-  echo "error: Tajpo_TajpoCore.bundle was not produced by 'swift build -c release' in $BIN_DIR." >&2
+  echo "error: valid Tajpo_TajpoCore.bundle was not produced by 'swift build -c release' in $BIN_DIR." >&2
   echo "error: the packaged app would fail to load its on-device demo lexicon. Aborting." >&2
   exit 1
 fi
