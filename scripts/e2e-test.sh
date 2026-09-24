@@ -27,14 +27,14 @@ fi
 PORT_FILE="$WORK/port"
 SERVER_PID=""
 TAJPO_PID=""
-DOCUMENT_ID=""
+DOCUMENT_NAME="Tajpo-E2E-$$.txt"
 ORIGINAL_DEFAULTS="$WORK/defaults.plist"
 
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
-  if [[ -n "$DOCUMENT_ID" ]]; then
-    osascript -e "tell application \"TextEdit\" to close document id $DOCUMENT_ID saving no" >/dev/null 2>&1 || true
+  if [[ -n "$DOCUMENT_NAME" ]]; then
+    osascript -e "tell application \"TextEdit\" to close document \"$DOCUMENT_NAME\" saving no" >/dev/null 2>&1 || true
   fi
   if [[ -n "$TAJPO_PID" ]]; then
     kill "$TAJPO_PID" 2>/dev/null || true
@@ -71,11 +71,26 @@ PORT="$(cat "$PORT_FILE")"
 defaults write "$BUNDLE_ID" completedOnboarding -bool true
 defaults write "$BUNDLE_ID" baseURL "http://127.0.0.1:$PORT/v1"
 
-printf "I think teh plan is good, and teh team agrees." > "$WORK/e2e.txt"
-open -na TextEdit "$WORK/e2e.txt"
+TEXT_FILE="$WORK/$DOCUMENT_NAME"
+printf "I think teh plan is good, and teh team agrees." > "$TEXT_FILE"
+# `open -na` can leave a new TextEdit process without opening its file on
+# some macOS releases. Let the existing TextEdit instance open the uniquely
+# named disposable document instead.
+open -a TextEdit "$TEXT_FILE"
 sleep 3
-DOCUMENT_ID="$(osascript -e 'tell application "TextEdit" to id of document 1' 2>/dev/null || true)"
-[[ -n "$DOCUMENT_ID" ]] || fail "could not identify the test TextEdit document"
+DOCUMENT_FOUND="$(osascript - "$DOCUMENT_NAME" <<'APPLESCRIPT' 2>/dev/null || true
+on run argv
+  set targetName to item 1 of argv
+  tell application "TextEdit"
+    repeat with candidate in documents
+      if (name of candidate as text) is targetName then return "yes"
+    end repeat
+  end tell
+  return "no"
+end run
+APPLESCRIPT
+)"
+[[ "$DOCUMENT_FOUND" == "yes" ]] || fail "could not identify the test TextEdit document"
 osascript -e 'tell application "TextEdit" to activate' -e 'delay 0.5' \
   -e 'tell application "System Events" to keystroke "a" using command down' \
   >/dev/null 2>&1 || fail "could not select text (System Events needs Accessibility)"
@@ -108,7 +123,7 @@ osascript -e 'tell application "System Events" to key code 36 using command down
 sleep 3
 screencapture -x "$OUT/e2e-4-replaced.png" 2>/dev/null || true
 
-ACTUAL="$(osascript -e "tell application \"TextEdit\" to get text of document id $DOCUMENT_ID" 2>/dev/null || true)"
+ACTUAL="$(osascript -e "tell application \"TextEdit\" to get text of document \"$DOCUMENT_NAME\"" 2>/dev/null || true)"
 EXPECTED="I think the plan is good, and the team agrees."
 [[ "$ACTUAL" == "$EXPECTED" ]] || fail "expected '$EXPECTED' but found '$ACTUAL'"
 
