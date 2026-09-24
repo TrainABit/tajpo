@@ -16,9 +16,7 @@ if [[ -z "$RESOURCE_BUNDLE" ]]; then
   echo "missing Tajpo_TajpoCore.bundle" >&2
   exit 1
 fi
-ditto "$RESOURCE_BUNDLE" "$APP/Tajpo_TajpoCore.bundle"
 ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
-test -f "$APP/Tajpo_TajpoCore.bundle/Contents/Resources/demo-lexicon.json"
 test -f "$APP/Contents/Resources/Tajpo_TajpoCore.bundle/Contents/Resources/demo-lexicon.json"
 cp "$ROOT/Sources/TajpoCore/Resources/AppIcon.png" "$APP/Contents/Resources/AppIcon.png"
 chmod +x "$APP/Contents/MacOS/Tajpo"
