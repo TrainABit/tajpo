@@ -13,23 +13,64 @@ public struct DemoLexicon: Codable, Sendable, Equatable {
 
 public enum DemoLexiconLoader {
     public static func load() -> DemoLexicon {
-        if let url = Bundle.module.url(forResource: "demo-lexicon", withExtension: "json"),
+        if let url = resourceURL(),
            let data = try? Data(contentsOf: url),
            let lexicon = try? JSONDecoder().decode(DemoLexicon.self, from: data) {
             return lexicon
         }
-        return DemoLexicon(
-            typos: ["teh": "the", "dont": "don't", "im": "I'm"],
-            filler: ["just", "really", "very", "actually"],
-            hedges: ["I think", "maybe", "perhaps"],
-            wordy: ["in order to": "to", "due to the fact that": "because"],
-            simplify: ["utilize": "use", "commence": "start"],
-            expandContractions: ["don't": "do not", "I'm": "I am"],
-            addContractions: ["do not": "don't", "I am": "I'm"],
-            casualSlang: ["gonna": "going to"]
-        )
+        return fallback
+    }
+
+    private static let fallback = DemoLexicon(
+        typos: ["teh": "the", "dont": "don't", "im": "I'm"],
+        filler: ["just", "really", "very", "actually"],
+        hedges: ["I think", "maybe", "perhaps"],
+        wordy: ["in order to": "to", "due to the fact that": "because"],
+        simplify: ["utilize": "use", "commence": "start"],
+        expandContractions: ["don't": "do not", "I'm": "I am"],
+        addContractions: ["do not": "don't", "I am": "I'm"],
+        casualSlang: ["gonna": "going to"]
+    )
+
+    /// Do not touch `Bundle.module` here. Its generated accessor calls
+    /// `fatalError` when a packaged app is missing the SwiftPM resource
+    /// bundle, which turns a recoverable demo fallback into a process crash.
+    /// Packaged builds can place the bundle at the app root or in Contents/Resources.
+    private static func resourceURL() -> URL? {
+        let fileManager = FileManager.default
+        let bundleName = "Tajpo_TajpoCore.bundle"
+        var roots: [URL?] = [
+            Bundle.main.resourceURL,
+            Bundle.main.bundleURL,
+            Bundle(for: DemoLexiconBundleMarker.self).resourceURL,
+            Bundle(for: DemoLexiconBundleMarker.self).bundleURL
+        ]
+        roots.append(contentsOf: Bundle.allBundles.flatMap { [$0.resourceURL, $0.bundleURL] })
+
+        var candidates: [URL] = []
+        for root in roots.compactMap({ $0 }) {
+            candidates.append(root.appendingPathComponent(bundleName))
+            candidates.append(root.appendingPathComponent("Contents/Resources/\(bundleName)"))
+        }
+
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let resource = bundle.url(forResource: "demo-lexicon", withExtension: "json") {
+                return resource
+            }
+            for relativePath in [
+                "Contents/Resources/demo-lexicon.json",
+                "demo-lexicon.json"
+            ] {
+                let resource = candidate.appendingPathComponent(relativePath)
+                if fileManager.fileExists(atPath: resource.path) { return resource }
+            }
+        }
+        return nil
     }
 }
+
+private final class DemoLexiconBundleMarker {}
 
 public struct DemoRewriteExtras: Sendable, Equatable {
     public var length: RewriteLength
