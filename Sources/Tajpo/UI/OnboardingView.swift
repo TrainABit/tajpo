@@ -98,7 +98,7 @@ struct OnboardingView: View {
         settings = model.settings
     }
 
-    static let size = CGSize(width: 800, height: 560)
+    static let size = CGSize(width: 800, height: 600)
 
     var body: some View {
         VStack(spacing: 0) {
