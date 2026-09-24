@@ -195,7 +195,7 @@ struct OpenAIClient: LLMClient {
         } catch let error as URLError where error.code == .cancelled {
             throw TajpoError.cancelled
         } catch let error as URLError where error.code == .appTransportSecurityRequiresSecureConnection {
-            throw TajpoError.network("macOS only allows plain http:// for local addresses (localhost, .local names, or IP addresses). Use https:// or a local address for this server")
+            throw TajpoError.network("macOS only allows plain http:// for literal loopback addresses (localhost, 127.0.0.1, or ::1). Use https:// or a loopback address for this server")
         } catch {
             if Task.isCancelled { throw TajpoError.cancelled }
             throw TajpoError.network(error.localizedDescription)

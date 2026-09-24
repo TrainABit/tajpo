@@ -43,6 +43,7 @@ final class TextSelectionService {
     }
 
     private let systemWideElement: AXUIElement
+    private static let axTimeout: CFTimeInterval = 0.10
     private var isBusy = false
     private var didPromptThisLaunch = false
 
@@ -233,7 +234,7 @@ final class TextSelectionService {
         var current: AXUIElement?
         var depth = 0
         current = element
-        while let node = current, depth < 10 {
+        while let node = current, depth < 6 {
             try Task.checkCancellation()
             let role = stringAttribute(node, kAXRoleAttribute) ?? ""
             let subrole = stringAttribute(node, kAXSubroleAttribute) ?? ""
@@ -325,7 +326,10 @@ final class TextSelectionService {
     }
 
     private func configure(_ element: AXUIElement) {
-        AXUIElementSetMessagingTimeout(element, 0.25)
+        // AX calls run on the main actor in this UI-owned service. Keep each
+        // individual call short; a timeout is converted into the clipboard /
+        // Copy-only path rather than freezing the menu-bar app.
+        AXUIElementSetMessagingTimeout(element, Self.axTimeout)
     }
 
     private func setAttribute(_ element: AXUIElement, _ attribute: CFString, _ value: CFTypeRef) -> AXError {

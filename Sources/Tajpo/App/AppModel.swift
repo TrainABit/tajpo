@@ -453,6 +453,7 @@ final class AppModel: ObservableObject {
 
     private func endRun(status: String) {
         isWorking = false
+        runTask = nil
         self.status = status
     }
 

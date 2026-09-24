@@ -19,7 +19,7 @@ PORT_FILE = sys.argv[3] if len(sys.argv) > 3 else ""
 
 
 def edited(user_message: str) -> str:
-    match = re.search(r"<(text\d*)>\n(.*)\n</\1>", user_message, re.S)
+    match = re.search(r"<(text[0-9A-Za-z_]*)>\n(.*)\n</\1>", user_message, re.S)
     text = match.group(2) if match else user_message
     return text.replace("teh", "the")
 
