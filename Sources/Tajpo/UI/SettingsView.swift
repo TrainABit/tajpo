@@ -361,7 +361,11 @@ private struct AISettings: View {
                 }
                 if provider == .openAI {
                     TextField("Project ID", text: $projectField, prompt: Text("Optional"))
-                        .onSubmit { settings.setProjectID(projectField) }
+                        .onSubmit {
+                            settings.setProjectID(projectField)
+                            model.invalidateAPIKeyValidation()
+                            model.refreshStatus()
+                        }
                 }
                 MessageView(message: modelMessage)
             }

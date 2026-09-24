@@ -62,8 +62,14 @@ final class UpdateChecker: ObservableObject {
                 throw UpdateError.invalidResponse
             }
             guard http.statusCode == 200 else {
-                if userInitiated { alert(message(for: http.statusCode), info: "GitHub did not return release information. Try again later.") }
-                if http.statusCode == 404 { available = nil }
+                if http.statusCode == 404 {
+                    // A repository with no published release is a valid,
+                    // completed state—not a reason to retry on every launch.
+                    defaults.set(now().timeIntervalSince1970, forKey: Self.lastCheckKey)
+                    available = nil
+                } else if userInitiated {
+                    alert(message(for: http.statusCode), info: "GitHub did not return release information. Try again later.")
+                }
                 return
             }
             guard data.count <= Self.maximumResponseBytes else { throw UpdateError.invalidResponse }

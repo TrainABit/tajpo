@@ -85,9 +85,9 @@ final class AppModel: ObservableObject {
                 Log.hotkey.error("Launch registration failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        refreshStatus()
+        refreshStatus(includeKeychain: !isDemo)
         statusTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshStatus() }
+            Task { @MainActor in self?.refreshStatus(includeKeychain: false) }
         }
         panel.onClose = { [weak self] in self?.panelClosed() }
         panel.onOutsideClick = { [weak self] in self?.outsideClick() }
@@ -103,17 +103,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refreshStatus() {
+    func refreshStatus(includeKeychain: Bool = true) {
         let trusted = DemoScene.simulatesReady || (selection.isTrusted && !DemoScene.simulatesNoAccess)
         if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
         let secure = IsSecureEventInputEnabled()
         if secure != secureInputActive { secureInputActive = secure }
-        let hint = keyStore.savedKeyHint()
-        if hint != apiKeyHint {
-            apiKeyHint = hint
-            // A different Keychain value is a new credential until it has
-            // been tested, even if a previous value was valid.
-            apiKeyValidated = false
+        if includeKeychain {
+            let hint = keyStore.savedKeyHint()
+            if hint != apiKeyHint {
+                apiKeyHint = hint
+                // A different Keychain value is a new credential until it has
+                // been tested, even if a previous value was valid.
+                apiKeyValidated = false
+            }
         }
         let login = LaunchAtLogin.isEnabled
         if login != launchAtLoginEnabled { launchAtLoginEnabled = login }

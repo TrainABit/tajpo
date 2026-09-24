@@ -159,7 +159,7 @@ struct OnboardingView: View {
         }
         .onReceive(poll) { _ in
             guard step == .everywhere else { return }
-            model.refreshStatus()
+            model.refreshStatus(includeKeychain: false)
             if model.accessibilityTrusted && !grantCelebrated { accessGranted() }
         }
     }
