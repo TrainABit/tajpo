@@ -781,7 +781,6 @@ private struct PanelActionButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(selected ? Color.clear : Color.primary.opacity(0.08))
             )
-            .opacity(configuration.isEnabled ? 1 : 0.45)
             .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }
