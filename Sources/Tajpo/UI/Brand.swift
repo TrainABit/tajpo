@@ -5,7 +5,6 @@ import SwiftUI
 /// panel's selected action and main buttons, so the app reads as one product.
 enum Brand {
     static let indigo = Color(red: 0.36, green: 0.36, blue: 0.93)
-    static let sidebar = Color(red: 0.105, green: 0.115, blue: 0.205)
 
     /// Lighter in dark mode, so text and icons in the accent keep their contrast.
     static let accent = Color(nsColor: NSColor(name: "TajpoAccent") { appearance in

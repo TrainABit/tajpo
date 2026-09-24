@@ -111,7 +111,7 @@ struct OnboardingView: View {
                 ScrollView {
                     content
                         .frame(maxWidth: 660, alignment: .topLeading)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .top)
                         .padding(.horizontal, 32)
                         .padding(.top, 10)
                         .padding(.bottom, 24)
@@ -183,8 +183,8 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 32)
-        .padding(.top, 22)
-        .padding(.bottom, 14)
+        .padding(.top, 42)
+        .padding(.bottom, 12)
     }
 
     private var progressHeader: some View {
@@ -192,26 +192,32 @@ struct OnboardingView: View {
             ForEach(OnboardingStep.allCases) { item in
                 let current = item == step
                 let done = item.rawValue < step.rawValue && isComplete(item)
-                HStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(current ? Brand.accent : done ? Brand.accent.opacity(0.16) : Color.primary.opacity(0.07))
-                        if done {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Brand.accent)
-                        } else {
-                            Image(systemName: item.symbol)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(current ? Color.white : Brand.accent)
+                Button {
+                    if item.rawValue < step.rawValue { step = item }
+                } label: {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(current ? Brand.accent : done ? Brand.accent.opacity(0.16) : Color.primary.opacity(0.07))
+                            if done {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(Brand.accent)
+                            } else {
+                                Image(systemName: item.symbol)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(current ? Color.white : Brand.accent)
+                            }
                         }
+                        .frame(width: 22, height: 22)
+                        Text(item.label)
+                            .font(.caption.weight(current ? .semibold : .regular))
+                            .foregroundStyle(current ? Color.primary : Color.secondary)
+                            .lineLimit(1)
                     }
-                    .frame(width: 22, height: 22)
-                    Text(item.label)
-                        .font(.caption.weight(current ? .semibold : .regular))
-                        .foregroundStyle(current ? Color.primary : Color.secondary)
-                        .lineLimit(1)
                 }
+                .buttonStyle(.plain)
+                .disabled(item.rawValue >= step.rawValue)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(item.label)\(done ? ", complete" : "")\(current ? ", current step" : "")")
 
