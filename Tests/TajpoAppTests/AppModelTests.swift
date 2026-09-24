@@ -51,7 +51,7 @@ func makeModel(
     client: FakeClient,
     key: String? = nil,
     localServer: Bool = true,
-    makeClient: (@escaping (String?, URL, String?) -> LLMClient)? = nil
+    makeClient: ((String?, URL, String?) -> LLMClient)? = nil
 ) -> AppModel {
     let defaults = UserDefaults(suiteName: "tajpo-tests-\(UUID().uuidString)")!
     let settings = AppSettings(defaults: defaults)

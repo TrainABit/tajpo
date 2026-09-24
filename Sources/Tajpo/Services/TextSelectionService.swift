@@ -25,14 +25,13 @@ struct TextCapture {
 enum ReplaceOutcome {
     /// The app's text was read back and contains the replacement.
     case verified
-    /// A synthetic paste was sent but the target could not be observed.
-    case pasteUnverified
     /// AX reported success but the target could not be verified; no paste was sent.
     case axUnverified
 }
 
-/// Reads and replaces the selection in other apps: Accessibility first,
-/// synthetic ⌘C/⌘V as a deliberately conservative fallback.
+/// Reads selections in other apps. Synthetic ⌘C is used only to read a
+/// clipboard-only target; replacement is Accessibility-only and fails closed
+/// when the target cannot be verified.
 @MainActor
 final class TextSelectionService {
     private struct ClipboardCapture {
@@ -119,7 +118,7 @@ final class TextSelectionService {
 
     /// Replaces the captured selection with `text`. `hidePanel` is called
     /// before any synthetic paste so the keystroke reaches the source app.
-    func replace(with text: String, capture: TextCapture, hidePanel: () -> Void) async throws -> ReplaceOutcome {
+    func replace(with text: String, capture: TextCapture) async throws -> ReplaceOutcome {
         if let blocker = capture.replaceBlocker { throw blocker }
         guard let app = capture.sourceApp, !app.isTerminated else { throw TajpoError.targetAppChanged }
         try Task.checkCancellation()
@@ -137,61 +136,11 @@ final class TextSelectionService {
                 }
             }
         }
-        return try await paste(text, capture: capture, hidePanel: hidePanel)
-    }
-
-    private func paste(_ text: String, capture: TextCapture, hidePanel: () -> Void) async throws -> ReplaceOutcome {
-        guard let app = capture.sourceApp, !app.isTerminated else { throw TajpoError.targetAppChanged }
-        hidePanel()
-        try Task.checkCancellation()
-        // Never activate an old application behind the user's back. The panel
-        // is non-activating, so the source app must still be frontmost here.
-        try ensureFrontmost(app)
-        try await Task.sleep(for: .milliseconds(120))
-        try Task.checkCancellation()
-        try ensureFrontmost(app)
-        if let element = capture.element {
-            try ensureSelectionUnchanged(element, capture: capture)
-        }
-
-        let pasteboard = NSPasteboard.general
-        if pasteboard.deniesProgrammaticAccess { throw TajpoError.pasteboardAccessDenied }
-        let originalCount = pasteboard.changeCount
-        guard let snapshot = ClipboardSnapshot(pasteboard) else { throw TajpoError.pasteboardUnavailable }
-        guard pasteboard.changeCount == originalCount else { throw TajpoError.pasteboardUnavailable }
-        guard pasteboard.writeTransient(text) else { throw TajpoError.pasteboardUnavailable }
-        let written = pasteboard.changeCount
-
-        do {
-            await Keyboard.waitForModifierRelease()
-            try Task.checkCancellation()
-            try ensureFrontmost(app)
-            Keyboard.postCommandShortcut("v", fallback: CGKeyCode(kVK_ANSI_V))
-
-            var outcome = ReplaceOutcome.pasteUnverified
-            if let element = capture.element {
-                // Never restore sooner than this: the app may read the pasteboard late.
-                try await Task.sleep(for: .milliseconds(300))
-                let deadline = ContinuousClock.now + .milliseconds(1500)
-                while ContinuousClock.now < deadline {
-                    try Task.checkCancellation()
-                    if case .inserted = verify(element, inserted: text, capture: capture) {
-                        outcome = .verified
-                        break
-                    }
-                    try await Task.sleep(for: .milliseconds(50))
-                }
-            } else {
-                try await Task.sleep(for: .milliseconds(900))
-            }
-            if pasteboard.changeCount == written {
-                snapshot.restore(to: pasteboard)
-            }
-            return outcome
-        } catch {
-            if pasteboard.changeCount == written { snapshot.restore(to: pasteboard) }
-            throw error
-        }
+        // Synthetic paste is intentionally never used as a fallback. A
+        // clipboard-only or unresponsive target may be an unknown terminal,
+        // where multiline text can become commands. Keep the result available
+        // for Copy and ask the user to paste it deliberately.
+        return .axUnverified
     }
 
     // MARK: Clipboard capture

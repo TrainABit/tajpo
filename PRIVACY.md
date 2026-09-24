@@ -21,7 +21,7 @@ Tajpo is a macOS app that edits text you select. It has no servers, no accounts,
 ## Permissions
 
 - **Accessibility.** Tajpo uses this to read the text you select and to put the result back, only when you press Tajpo's shortcut or use its menu. It does not record keystrokes, read your screen, or read other windows, and it refuses to read password fields.
-- **Clipboard.** Some apps don't support Accessibility. There, Tajpo briefly uses the clipboard to copy the selection or paste the result, then restores what you had. The replacement item is marked for clipboard managers; the original item was created by the source app, so a clipboard manager may see that brief copy before Tajpo can mark it.
+- **Clipboard.** Some apps don't support Accessibility. There, Tajpo briefly uses the clipboard to copy the selected text, then restores what you had. The temporary copy is marked for clipboard managers; the original item was created by the source app, so a clipboard manager may see that brief copy before Tajpo can mark it.
 
 ## Contact
 

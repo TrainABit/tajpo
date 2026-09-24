@@ -339,16 +339,13 @@ final class AppModel: ObservableObject {
                     await self.finishSuccessfully(notice: "Replaced", status: "Replaced")
                     return
                 }
-                let outcome = try await self.selection.replace(with: text, capture: capture, hidePanel: { self.panel.hide() })
+                let outcome = try await self.selection.replace(with: text, capture: capture)
                 try Task.checkCancellation()
                 guard self.replaceID == id, self.session.generation == generation else { return }
                 switch outcome {
                 case .verified:
                     // Paste path hid the panel; only flash the confirmation when it's visible.
                     await self.finishSuccessfully(notice: "Replaced", status: "Replaced")
-                case .pasteUnverified:
-                    self.settings.recordUse()
-                    if self.session.generation == generation { self.closePanel(status: "Pasted. Check the result") }
                 case .axUnverified:
                     self.panel.reshow()
                     self.session.report(.api("The replacement could not be verified. The result is still available to copy."))

@@ -14,10 +14,32 @@ struct OpenAIClient: LLMClient {
     static let maximumSSELineBytes = 1_000_000
     static let maximumErrorBodyBytes = 65_536
 
+    /// Never follow an HTTP redirect with a provider request. In particular,
+    /// this prevents an official OpenAI request from being replayed with its
+    /// Authorization header to an unrelated host.
+    private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+    }
+
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
+    }()
+
     let apiKey: String?
     let baseURL: URL
     let projectID: String?
-    var session: URLSession = .shared
+    var session: URLSession = OpenAIClient.defaultSession
 
     private struct Message: Encodable {
         let role: String
