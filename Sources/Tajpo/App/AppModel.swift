@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     // Menu-level state. Per-token state lives in `session`.
     @Published private(set) var accessibilityTrusted = false
     @Published private(set) var apiKeyHint: String?
+    @Published private(set) var apiKeyValidated = false
     @Published private(set) var hotkeyErrors: [HotkeyAction: TajpoError] = [:]
     @Published private(set) var secureInputActive = false
     @Published private(set) var isWorking = false
@@ -37,16 +38,19 @@ final class AppModel: ObservableObject {
 
     private let selection: TextSelectionService
     private let keyStore: APIKeyStoring
-    private let makeClient: (String?, URL, String) -> LLMClient
+    private let makeClient: (String?, URL, String?) -> LLMClient
     let panel = InlinePanelController()
     private lazy var settingsWindow = SettingsWindowController(model: self)
     private lazy var onboardingWindow = OnboardingWindowController(model: self)
 
     private var runID: UUID?
     private var runTask: Task<Void, Never>?
+    private var replaceID: UUID?
+    private var replaceTask: Task<Void, Never>?
     private var isCapturing = false
     private var didStart = false
     private var statusTimer: Timer?
+    private(set) var isDemo = false
 
     /// Set by the onboarding shortcut step: a press is reported instead of opening the panel.
     var shortcutProbe: (() -> Void)?
@@ -57,7 +61,7 @@ final class AppModel: ObservableObject {
         presets: PresetStore = PresetStore(),
         selection: TextSelectionService = TextSelectionService(),
         keyStore: APIKeyStoring = KeychainAPIKeyStore(),
-        makeClient: @escaping (String?, URL, String) -> LLMClient = { key, url, project in
+        makeClient: @escaping (String?, URL, String?) -> LLMClient = { key, url, project in
             OpenAIClient(apiKey: key, baseURL: url, projectID: project)
         }
     ) {
@@ -66,6 +70,7 @@ final class AppModel: ObservableObject {
         self.selection = selection
         self.keyStore = keyStore
         self.makeClient = makeClient
+        self.isDemo = DemoScene.requested != nil
         session.tone = settings.lastTone
     }
 
@@ -86,7 +91,11 @@ final class AppModel: ObservableObject {
         }
         panel.onClose = { [weak self] in self?.panelClosed() }
         panel.onOutsideClick = { [weak self] in self?.outsideClick() }
-        updates.checkOnLaunchIfDue()
+        if isDemo {
+            // Demo scenes are deliberately offline, including update checks.
+        } else {
+            updates.checkOnLaunchIfDue()
+        }
         if let scene = DemoScene.requested {
             showDemo(scene)
         } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
@@ -95,17 +104,23 @@ final class AppModel: ObservableObject {
     }
 
     func refreshStatus() {
-        let trusted = selection.isTrusted && !DemoScene.simulatesNoAccess
+        let trusted = DemoScene.simulatesReady || (selection.isTrusted && !DemoScene.simulatesNoAccess)
         if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
         let secure = IsSecureEventInputEnabled()
         if secure != secureInputActive { secureInputActive = secure }
         let hint = keyStore.savedKeyHint()
-        if hint != apiKeyHint { apiKeyHint = hint }
+        if hint != apiKeyHint {
+            apiKeyHint = hint
+            if hint == nil { apiKeyValidated = false }
+        }
         let login = LaunchAtLogin.isEnabled
         if login != launchAtLoginEnabled { launchAtLoginEnabled = login }
     }
 
-    var needsAPIKey: Bool { settings.usesOpenAI && apiKeyHint == nil && !DemoScene.simulatesReady }
+    var needsAPIKey: Bool {
+        guard settings.usesOpenAI, !DemoScene.simulatesReady else { return false }
+        return apiKeyHint == nil || !apiKeyValidated
+    }
 
     var needsSetup: Bool { !accessibilityTrusted || needsAPIKey || !hotkeyErrors.isEmpty }
 
@@ -158,6 +173,7 @@ final class AppModel: ObservableObject {
     func openPanel(thenRun action: RewriteAction? = nil, instruction: String? = nil) {
         guard !isCapturing, !session.isReplacing else { return }
         cancelRun()
+        cancelReplace()
         session.reset()
         let generation = session.generation
         isCapturing = true
@@ -215,17 +231,33 @@ final class AppModel: ObservableObject {
         let id = UUID()
         runID = id
         let tone = session.tone
-        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model,
-                                            instruction: action == .custom ? instruction : nil)
         let tag = PromptBuilder.tagName(for: capture.text)
+        let request = PromptBuilder.request(text: capture.text, action: action, tone: tone, preset: presets.selected, model: model,
+                                            instruction: action == .custom ? instruction : nil, tag: tag)
         let key: String?
-        do {
-            key = try keyStore.load()
-        } catch {
-            session.fail(Self.map(error))
-            return
+        let project: String?
+        if isDemo {
+            key = nil
+            project = nil
+        } else if settings.usesOpenAI {
+            do {
+                key = try keyStore.load()
+            } catch {
+                session.fail(Self.map(error))
+                return
+            }
+            project = settings.projectID
+        } else {
+            // Never load or forward the OpenAI credential to a custom server.
+            key = nil
+            project = nil
         }
-        let client = makeClient(key, settings.baseURL, settings.projectID)
+        let client: LLMClient
+        if isDemo {
+            client = DemoLLMClient()
+        } else {
+            client = makeClient(key, settings.baseURL, project)
+        }
         session.begin(action)
         isWorking = true
         status = "Writing…"
@@ -236,8 +268,11 @@ final class AppModel: ObservableObject {
                     guard let self, self.runID == id else { return }
                     self.session.update(preview: partial)
                 }
+                try Task.checkCancellation()
                 guard let self, self.runID == id else { return }
-                self.session.finish(OutputCleaner.finalize(output, original: capture.text, tag: tag))
+                let finalized = OutputCleaner.finalize(output, original: capture.text, tag: tag)
+                try OutputValidator.validate(finalized, action: action, original: capture.text)
+                self.session.finish(finalized)
                 self.lastAction = action
                 self.lastInstruction = action == .custom ? instruction : nil
                 if action == .custom { self.settings.rememberInstruction(instruction) }
@@ -260,6 +295,7 @@ final class AppModel: ObservableObject {
 
     func stop() {
         cancelRun()
+        cancelReplace()
         session.cancelled()
     }
 
@@ -274,32 +310,51 @@ final class AppModel: ObservableObject {
 
     func replace() {
         guard session.canReplace, let capture = session.capture, let text = session.result else { return }
+        guard replaceTask == nil else { return }
         session.isReplacing = true
         let generation = session.generation
-        Task {
-            defer { if session.generation == generation { session.isReplacing = false } }
-            if capture.method == .local {
-                guard let provider = localTextProvider else {
-                    session.report(.targetAppChanged)
-                    return
+        let id = UUID()
+        replaceID = id
+        replaceTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.replaceID == id {
+                    self.replaceID = nil
+                    self.replaceTask = nil
+                    if self.session.generation == generation { self.session.isReplacing = false }
                 }
-                provider.replacePracticeText(with: text, diff: session.diff)
-                await finishSuccessfully(notice: "Replaced", status: "Replaced")
-                return
             }
             do {
-                let outcome = try await selection.replace(with: text, capture: capture, hidePanel: { panel.hide() })
-                if outcome == .verified {
+                try Task.checkCancellation()
+                guard self.replaceID == id, self.session.generation == generation else { return }
+                if capture.method == .local {
+                    guard let provider = self.localTextProvider else {
+                        self.session.report(.targetAppChanged)
+                        return
+                    }
+                    provider.replacePracticeText(with: text, diff: self.session.diff)
+                    try Task.checkCancellation()
+                    await self.finishSuccessfully(notice: "Replaced", status: "Replaced")
+                    return
+                }
+                let outcome = try await self.selection.replace(with: text, capture: capture, hidePanel: { self.panel.hide() })
+                try Task.checkCancellation()
+                guard self.replaceID == id, self.session.generation == generation else { return }
+                switch outcome {
+                case .verified:
                     // Paste path hid the panel; only flash the confirmation when it's visible.
-                    await finishSuccessfully(notice: "Replaced", status: "Replaced")
-                } else {
-                    settings.recordUse()
-                    if session.generation == generation { closePanel(status: "Pasted. Check the result") }
+                    await self.finishSuccessfully(notice: "Replaced", status: "Replaced")
+                case .pasteUnverified:
+                    self.settings.recordUse()
+                    if self.session.generation == generation { self.closePanel(status: "Pasted. Check the result") }
+                case .axUnverified:
+                    self.panel.reshow()
+                    self.session.report(.api("The replacement could not be verified. The result is still available to copy."))
                 }
             } catch {
-                guard session.generation == generation else { return }
-                panel.reshow()
-                session.report(Self.map(error))
+                guard self.replaceID == id, self.session.generation == generation else { return }
+                self.panel.reshow()
+                self.session.report(Self.map(error))
             }
         }
     }
@@ -362,6 +417,7 @@ final class AppModel: ObservableObject {
 
     func closePanel(status: String? = nil) {
         cancelRun()
+        cancelReplace()
         panel.close()
         session.reset()
         if let status { self.status = status }
@@ -369,6 +425,7 @@ final class AppModel: ObservableObject {
 
     private func panelClosed() {
         cancelRun()
+        cancelReplace()
         session.reset()
     }
 
@@ -386,13 +443,21 @@ final class AppModel: ObservableObject {
         if isWorking { endRun(status: "Ready") }
     }
 
+    private func cancelReplace() {
+        replaceID = nil
+        replaceTask?.cancel()
+        replaceTask = nil
+        session.isReplacing = false
+    }
+
     private func endRun(status: String) {
         isWorking = false
         self.status = status
     }
 
     private func configurationProblem() -> TajpoError? {
-        needsAPIKey ? .missingAPIKey : nil
+        if isDemo { return nil }
+        return needsAPIKey ? .missingAPIKey : nil
     }
 
     static func map(_ error: Error) -> TajpoError {
@@ -498,20 +563,43 @@ final class AppModel: ObservableObject {
 
     // MARK: API key
 
-    func saveAPIKey(_ text: String) throws {
-        try keyStore.save(text)
+    func invalidateAPIKeyValidation() {
+        if settings.usesOpenAI { apiKeyValidated = false }
+    }
+
+    /// Tests a candidate key before replacing a previously working key. A
+    /// failed candidate is never written to the Keychain.
+    func saveAndValidateAPIKey(_ text: String) async throws {
+        guard settings.usesOpenAI, !isDemo else { throw TajpoError.missingAPIKey }
+        let candidate = try APIKeyValidator.validate(text)
+        let client = makeClient(candidate, settings.baseURL, settings.projectID)
+        try await client.testConnection(model: settings.model)
+        try keyStore.save(candidate)
+        apiKeyValidated = true
         refreshStatus()
     }
 
     func removeAPIKey() throws {
         try keyStore.delete()
+        apiKeyValidated = false
         refreshStatus()
     }
 
     /// Checks the saved key, credit, and model with a tiny request.
     func testConnection() async throws {
-        if needsAPIKey { throw TajpoError.missingAPIKey }
-        let client = makeClient(try keyStore.load(), settings.baseURL, settings.projectID)
+        if isDemo { return }
+        if settings.usesOpenAI && apiKeyHint == nil { throw TajpoError.missingAPIKey }
+        let key: String?
+        let project: String?
+        if settings.usesOpenAI {
+            key = try keyStore.load()
+            project = settings.projectID
+        } else {
+            key = nil
+            project = nil
+        }
+        let client = makeClient(key, settings.baseURL, project)
         try await client.testConnection(model: settings.model)
+        if settings.usesOpenAI { apiKeyValidated = true }
     }
 }

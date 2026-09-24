@@ -58,7 +58,7 @@ struct MenuContent: View {
         }
         if model.needsAPIKey {
             Button { model.showOnboarding(at: OnboardingStep.connect.rawValue) } label: {
-                Label("Finish Setup: Add Your OpenAI Key…", systemImage: "key")
+                Label(model.apiKeyHint == nil ? "Finish Setup: Add Your OpenAI Key…" : "Finish Setup: Check Your OpenAI Key…", systemImage: "key")
             }
         }
         if !model.accessibilityTrusted {

@@ -69,26 +69,43 @@ enum PasteboardMarker {
 }
 
 /// A copy of the pasteboard's items with their types in original order.
+/// Initialization fails closed if a promised/lazy representation cannot be
+/// materialized; silently dropping a type could destroy a user's clipboard.
 struct ClipboardSnapshot {
+    private static let maximumItemBytes = 10 * 1024 * 1024
     private let items: [[(NSPasteboard.PasteboardType, Data)]]
 
-    init(_ pasteboard: NSPasteboard) {
-        items = (pasteboard.pasteboardItems ?? []).map { item in
-            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+    init?(_ pasteboard: NSPasteboard) {
+        var copied: [[(NSPasteboard.PasteboardType, Data)]] = []
+        var totalBytes = 0
+        for item in pasteboard.pasteboardItems ?? [] {
+            var pairs: [(NSPasteboard.PasteboardType, Data)] = []
+            for type in item.types {
+                guard let data = item.data(forType: type) else { return nil }
+                totalBytes += data.count
+                guard totalBytes <= Self.maximumItemBytes else { return nil }
+                pairs.append((type, data))
+            }
+            copied.append(pairs)
         }
+        items = copied
     }
 
     /// Restores the saved items, marked so clipboard managers don't record
     /// them a second time.
-    func restore(to pasteboard: NSPasteboard) {
+    @discardableResult
+    func restore(to pasteboard: NSPasteboard) -> Bool {
         pasteboard.clearContents()
+        var failed = false
         let objects = items.map { pairs -> NSPasteboardItem in
             let item = NSPasteboardItem()
-            for (type, data) in pairs { item.setData(data, forType: type) }
+            for (type, data) in pairs where !item.setData(data, forType: type) {
+                failed = true
+            }
             return item
         }
         objects.first?.setData(Data(), forType: PasteboardMarker.transient)
-        if !objects.isEmpty { pasteboard.writeObjects(objects) }
+        return !failed && (objects.isEmpty || pasteboard.writeObjects(objects))
     }
 }
 

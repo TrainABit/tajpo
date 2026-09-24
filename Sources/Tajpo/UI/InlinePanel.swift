@@ -561,7 +561,8 @@ struct InlineRewriteView: View {
     private var resultStats: String? {
         guard let result = session.result, let capture = session.capture else { return nil }
         if session.action == .correct {
-            let fixes = session.diff?.filter { $0.kind == .inserted }.count ?? 0
+            guard let diff = session.diff else { return "Result ready" }
+            let fixes = diff.filter { $0.kind == .inserted }.count
             return fixes == 0 ? "No mistakes found" : "\(fixes) \(fixes == 1 ? "fix" : "fixes")"
         }
         let before = Self.wordCount(capture.text)

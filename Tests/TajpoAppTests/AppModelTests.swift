@@ -47,7 +47,12 @@ func uncancellableDelay(_ seconds: Double) async {
 }
 
 @MainActor
-func makeModel(client: FakeClient, key: String? = nil, localServer: Bool = true) -> AppModel {
+func makeModel(
+    client: FakeClient,
+    key: String? = nil,
+    localServer: Bool = true,
+    makeClient: (@escaping (String?, URL, String?) -> LLMClient)? = nil
+) -> AppModel {
     let defaults = UserDefaults(suiteName: "tajpo-tests-\(UUID().uuidString)")!
     let settings = AppSettings(defaults: defaults)
     if localServer { try? settings.setBaseURL("http://127.0.0.1:9/v1") }
@@ -56,7 +61,7 @@ func makeModel(client: FakeClient, key: String? = nil, localServer: Bool = true)
         presets: PresetStore(defaults: defaults),
         selection: TextSelectionService(),
         keyStore: FakeKeyStore(key: key),
-        makeClient: { _, _, _ in client }
+        makeClient: makeClient ?? { _, _, _ in client }
     )
     model.refreshStatus()
     return model
@@ -166,6 +171,29 @@ func capture(_ model: AppModel, _ text: String, blocker: TajpoError? = nil) {
         await eventually { model.session.phase == .finished }
         #expect(!model.session.canReplace)
         #expect(model.session.copyableText == "Done.")
+    }
+
+    @Test func emptyFinalOutputCannotBeReplaced() async {
+        let client = FakeClient { _, _ in "" }
+        let model = makeModel(client: client)
+        capture(model, "Text that must not disappear.")
+        model.run(.correct)
+        await eventually { model.session.phase == .failed }
+        #expect(model.session.error == .emptyResponse)
+        #expect(!model.session.canReplace)
+    }
+
+    @Test func customProviderDoesNotLoadOpenAICredential() async {
+        let client = FakeClient { _, _ in "Result" }
+        var receivedKey: String??
+        let model = makeModel(client: client, key: "sk-secret", localServer: true) { key, _, _ in
+            receivedKey = .some(key)
+            return client
+        }
+        capture(model, "Some text")
+        model.run(.improve)
+        await eventually { model.session.phase == .finished }
+        #expect(receivedKey == .some(nil))
     }
 }
 

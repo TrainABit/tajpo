@@ -10,6 +10,10 @@ protocol LLMClient: Sendable {
 
 /// OpenAI Chat Completions, or any OpenAI-compatible server (Ollama, LM Studio, llama.cpp).
 struct OpenAIClient: LLMClient {
+    static let maximumResponseCharacters = 200_000
+    static let maximumSSELineBytes = 1_000_000
+    static let maximumErrorBodyBytes = 65_536
+
     let apiKey: String?
     let baseURL: URL
     let projectID: String?
@@ -44,10 +48,13 @@ struct OpenAIClient: LLMClient {
             let (bytes, response) = try await session.bytes(for: try makeRequest(body))
             try await Self.check(response, bytes: bytes)
 
-            var accumulator = StreamAccumulator()
+            var accumulator = StreamAccumulator(maximumCharacters: Self.maximumResponseCharacters)
             var lastEmit = ContinuousClock.now
             for try await line in bytes.lines {
                 try Task.checkCancellation()
+                guard line.utf8.count <= Self.maximumSSELineBytes else {
+                    throw TajpoError.api("The AI server sent an oversized response line.")
+                }
                 var changed = false
                 for event in SSEParser.parse(line: line) {
                     changed = try accumulator.consume(event) || changed
@@ -74,29 +81,54 @@ struct OpenAIClient: LLMClient {
             max_tokens: isOpenAI ? nil : 16
         )
         try await mapErrors {
-            let (data, response) = try await session.data(for: try makeRequest(body))
+            let (bytes, response) = try await session.bytes(for: try makeRequest(body))
             guard let http = response as? HTTPURLResponse else { throw TajpoError.network("Invalid response.") }
+            let data = try await Self.readLimitedData(from: bytes, limit: Self.maximumErrorBodyBytes)
             guard (200..<300).contains(http.statusCode) else {
                 throw OpenAIErrorParser.error(
                     status: http.statusCode,
-                    body: String(decoding: data.prefix(65_536), as: UTF8.self),
+                    body: String(decoding: data, as: UTF8.self),
                     retryAfter: http.value(forHTTPHeaderField: "Retry-After")
                 )
+            }
+            do {
+                let payload = try JSONDecoder().decode(ConnectionResponse.self, from: data)
+                guard payload.choices.contains(where: { $0.message?.content != nil || $0.delta?.content != nil }) else {
+                    throw TajpoError.api("The server accepted the request but did not return a valid completion.")
+                }
+            } catch let error as TajpoError {
+                throw error
+            } catch {
+                throw TajpoError.api("The server returned an invalid connection-test response.")
             }
         }
     }
 
+    private struct ConnectionResponse: Decodable {
+        struct Choice: Decodable {
+            struct Message: Decodable { let content: String? }
+            struct Delta: Decodable { let content: String? }
+            let message: Message?
+            let delta: Delta?
+        }
+        let choices: [Choice]
+    }
+
     private func makeRequest(_ body: Body) throws -> URLRequest {
-        var request = URLRequest(url: ProviderSettings.chatCompletionsURL(baseURL: baseURL))
+        let validatedBaseURL = try ProviderSettings.validateBaseURL(baseURL.absoluteString)
+        var request = URLRequest(url: ProviderSettings.chatCompletionsURL(baseURL: validatedBaseURL))
         request.httpMethod = "POST"
         request.timeoutInterval = 60
-        if let apiKey, !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        if let projectID, !projectID.isEmpty {
-            request.setValue(projectID, forHTTPHeaderField: "OpenAI-Project")
-        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if ProviderSettings.isOfficialOpenAI(baseURL: validatedBaseURL) {
+            if let apiKey, !apiKey.isEmpty {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
+            if let projectID, !projectID.isEmpty {
+                request.setValue(projectID, forHTTPHeaderField: "OpenAI-Project")
+            }
+        }
         request.httpBody = try JSONEncoder().encode(body)
         return request
     }
@@ -104,13 +136,30 @@ struct OpenAIClient: LLMClient {
     private static func check(_ response: URLResponse, bytes: URLSession.AsyncBytes) async throws {
         guard let http = response as? HTTPURLResponse else { throw TajpoError.network("Invalid response.") }
         guard (200..<300).contains(http.statusCode) else {
-            var body = ""
-            for try await line in bytes.lines {
-                body += line + "\n"
-                if body.utf8.count > 65_536 { break }
-            }
-            throw OpenAIErrorParser.error(status: http.statusCode, body: body, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+            let data = try await readLimitedData(from: bytes, limit: maximumErrorBodyBytes)
+            throw OpenAIErrorParser.error(
+                status: http.statusCode,
+                body: String(decoding: data, as: UTF8.self),
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After")
+            )
         }
+    }
+
+    private static func readLimitedData(
+        from bytes: URLSession.AsyncBytes,
+        limit: Int
+    ) async throws -> Data {
+        var data = Data()
+        data.reserveCapacity(min(limit, 64 * 1024))
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard data.count + line.utf8.count + 1 <= limit else {
+                throw TajpoError.api("The AI server returned an oversized response.")
+            }
+            data.append(contentsOf: line.utf8)
+            data.append(0x0A)
+        }
+        return data
     }
 
     /// Normalizes errors: URLSession reports cancellation as `URLError(.cancelled)`.

@@ -46,22 +46,51 @@ public enum ModelCatalog {
 }
 
 public enum ProviderSettings {
+    public static let officialOpenAIHost = "api.openai.com"
+
     /// Checks a base URL typed by the user and removes a trailing slash.
+    /// Plain HTTP is intentionally limited to literal loopback addresses;
+    /// every remote provider must use HTTPS.
     public static func validateBaseURL(_ text: String) throws -> URL {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-              url.host?.isEmpty == false else {
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil else {
+            throw TajpoError.invalidBaseURL
+        }
+        if scheme == "http", !isLoopbackHost(host) {
             throw TajpoError.invalidBaseURL
         }
         return url
     }
 
+    /// The official OpenAI API is the only provider that receives Tajpo's
+    /// OpenAI credential. This is intentionally an exact-origin check rather
+    /// than a suffix check (`evilopenai.com` must never match).
+    public static func isOfficialOpenAI(baseURL: URL) -> Bool {
+        guard baseURL.scheme?.lowercased() == "https",
+              baseURL.host?.lowercased() == officialOpenAIHost,
+              baseURL.port == nil || baseURL.port == 443,
+              baseURL.user == nil, baseURL.password == nil,
+              baseURL.query == nil, baseURL.fragment == nil else {
+            return false
+        }
+        let path = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return path.isEmpty || path == "v1"
+    }
+
     /// The official OpenAI API needs a key; local OpenAI-compatible servers
-    /// (Ollama, LM Studio, llama.cpp) usually do not.
+    /// and custom HTTPS endpoints must never receive that credential.
     public static func requiresAPIKey(baseURL: URL) -> Bool {
-        baseURL.host?.lowercased().hasSuffix("openai.com") ?? true
+        isOfficialOpenAI(baseURL: baseURL)
+    }
+
+    public static func isLoopbackHost(_ host: String) -> Bool {
+        let normalized = host.lowercased()
+        return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
     }
 
     public static func chatCompletionsURL(baseURL: URL) -> URL {

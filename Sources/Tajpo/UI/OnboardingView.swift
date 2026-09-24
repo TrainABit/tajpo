@@ -70,6 +70,7 @@ struct OnboardingView: View {
     // Connect
     @State private var keyField = ""
     @State private var keyStatus: KeyStatus = .idle
+    @State private var connectionGeneration = UUID()
     @State private var showLocalOption = false
 
     // Try it
@@ -247,7 +248,10 @@ struct OnboardingView: View {
     private func isComplete(_ item: OnboardingStep) -> Bool {
         switch item {
         case .welcome: true
-        case .connect: !model.needsAPIKey && keyStatus != .checking
+        case .connect:
+            if model.isDemo { return true }
+            if settings.usesOpenAI { return model.apiKeyValidated && keyStatus != .checking }
+            return keyStatus == .connected
         case .tryIt: practice.fixes != nil
         case .everywhere: model.accessibilityTrusted
         case .done: false
@@ -306,7 +310,7 @@ struct OnboardingView: View {
             if settings.usesOpenAI {
                 StepHeader(symbol: "key.fill", tint: Brand.accent, title: "Connect your OpenAI account",
                            subtitle: "Tajpo runs on your own API key. Your text goes straight from your Mac to OpenAI, never to us.")
-                if let hint = model.apiKeyHint, keyField.isEmpty, keyStatus == .idle || keyStatus == .connected {
+                if let hint = model.apiKeyHint, keyField.isEmpty, model.apiKeyValidated, (keyStatus == .idle || keyStatus == .connected) {
                     Label("Connected · \(hint)", systemImage: "checkmark.seal.fill")
                         .font(.headline)
                         .foregroundStyle(.green)
@@ -320,8 +324,9 @@ struct OnboardingView: View {
                         HStack(alignment: .center, spacing: 8) {
                             numberBadge(3)
                             Text("Paste it here")
-                            SecureField("sk-…", text: $keyField)
+                            SecureField("OpenAI API key", text: $keyField)
                                 .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("OpenAI API key")
                             Button("Paste Key") { pasteKey() }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(keyStatus == .checking)
@@ -425,6 +430,7 @@ struct OnboardingView: View {
                 KeyCaps(shortcut: settings.rewriteShortcut)
             }
             TextEditor(text: $practice.text)
+                .accessibilityLabel("Practice text")
                 .font(.title3)
                 .frame(height: 70)
                 .scrollIndicators(.never)
@@ -584,7 +590,13 @@ struct OnboardingView: View {
 
     private var missingItems: [(title: String, step: OnboardingStep)] {
         var items: [(String, OnboardingStep)] = []
-        if model.needsAPIKey { items.append(("Add your OpenAI key (needed to edit text)", .connect)) }
+        if model.isDemo {
+            // Demo scenes intentionally do not require a real credential.
+        } else if settings.usesOpenAI {
+            if model.needsAPIKey { items.append(("Add and validate your OpenAI key (needed to edit text)", .connect)) }
+        } else if keyStatus != .connected {
+            items.append(("Check your AI server connection", .connect))
+        }
         if !model.accessibilityTrusted { items.append(("Allow Tajpo in other apps (Accessibility)", .everywhere)) }
         if settings.rewriteShortcut == nil || model.hotkeyErrors[.rewrite] != nil { items.append(("Choose a working shortcut", .tryIt)) }
         return items
@@ -625,7 +637,11 @@ struct OnboardingView: View {
     private var primaryTitle: String {
         switch step {
         case .welcome: "Get Started"
-        case .connect: (!model.needsAPIKey && keyField.isEmpty) ? "Continue" : "Check Key"
+        case .connect:
+            if model.isDemo { return "Continue" }
+            if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Check Key" }
+            if settings.usesOpenAI, model.apiKeyHint != nil, !model.apiKeyValidated { return "Test Saved Key" }
+            return isComplete(.connect) ? "Continue" : "Check Connection"
         case .tryIt: "Continue"
         case .everywhere: model.accessibilityTrusted ? "Continue" : "Open System Settings"
         case .done: missingItems.isEmpty ? "Start Writing" : "Finish Later"
@@ -635,13 +651,17 @@ struct OnboardingView: View {
     private func primaryAction() {
         switch step {
         case .connect:
-            if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Return in the key field lands here: save and check instead of dropping the key.
-                checkKey()
-            } else if model.needsAPIKey {
-                keyStatus = .warning("Paste your API key first, or choose “I'll Do This Later”.")
-            } else {
+            if model.isDemo {
                 move(1)
+            } else if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Return in the key field lands here: test and save instead of dropping the key.
+                checkKey()
+            } else if settings.usesOpenAI, model.apiKeyHint != nil, !model.apiKeyValidated {
+                checkConnection()
+            } else if isComplete(.connect) {
+                move(1)
+            } else {
+                keyStatus = .warning("Paste your API key first, or choose “I’ll Do This Later”.")
             }
         case .everywhere:
             if model.accessibilityTrusted {
@@ -670,7 +690,9 @@ struct OnboardingView: View {
                 return
             }
         }
-        model.updates.automatic = checkUpdates
+        if checkUpdates != model.updates.automatic {
+            model.updates.automatic = checkUpdates
+        }
         savedStep = 0
         model.completeOnboarding()
         model.celebrateMenuBarIcon()
@@ -681,13 +703,15 @@ struct OnboardingView: View {
         case .tryIt:
             model.localTextProvider = practice
         case .done:
-            launchAtLogin = LaunchAtLogin.isAvailable
+            launchAtLogin = LaunchAtLogin.isAvailable ? model.launchAtLoginEnabled : false
+            checkUpdates = model.updates.automatic
         default:
             break
         }
     }
 
     private func leave(_ step: OnboardingStep) {
+        if step == .connect { connectionGeneration = UUID() }
         if step == .tryIt { model.localTextProvider = nil }
     }
 
@@ -704,30 +728,40 @@ struct OnboardingView: View {
 
     private func checkKey() {
         let trimmed = keyField.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
+        guard !trimmed.isEmpty else { return }
+        let generation = UUID()
+        connectionGeneration = generation
+        keyStatus = .checking
+        Task {
             do {
-                try model.saveAPIKey(trimmed)
+                try await model.saveAndValidateAPIKey(trimmed)
+                guard connectionGeneration == generation else { return }
+                keyField = ""
+                keyStatus = .connected
+                try? await Task.sleep(for: .seconds(1))
+                if connectionGeneration == generation, step == .connect { move(1) }
             } catch {
-                keyStatus = .failure(AppModel.map(error).localizedDescription, nil)
-                return
-            }
-            keyField = ""
-            if !APIKeyValidator.looksLikeOpenAIKey(trimmed) {
-                keyStatus = .warning("Saved, but this doesn't look like an OpenAI key (they start with “sk-”). Check it if the connection fails.")
+                guard connectionGeneration == generation else { return }
+                // The previous key remains in Keychain because validation
+                // happens before saveAndValidateAPIKey writes the candidate.
+                keyStatus = Self.friendly(AppModel.map(error))
             }
         }
-        checkConnection()
     }
 
     private func checkConnection() {
+        let generation = UUID()
+        connectionGeneration = generation
         keyStatus = .checking
         Task {
             do {
                 try await model.testConnection()
+                guard connectionGeneration == generation else { return }
                 keyStatus = .connected
                 try? await Task.sleep(for: .seconds(1))
-                if step == .connect { move(1) }
+                if connectionGeneration == generation, step == .connect { move(1) }
             } catch {
+                guard connectionGeneration == generation else { return }
                 keyStatus = Self.friendly(AppModel.map(error))
             }
         }

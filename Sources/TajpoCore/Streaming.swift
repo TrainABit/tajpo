@@ -45,18 +45,28 @@ public enum SSEParser {
 
 /// Collects stream events and decides whether the result is complete.
 public struct StreamAccumulator: Sendable {
+    public static let defaultMaximumCharacters = 200_000
+
     public private(set) var text = ""
     public private(set) var finishReason: String?
     public private(set) var sawDone = false
+    private let maximumCharacters: Int
+    private var characterCount = 0
 
-    public init() {}
+    public init(maximumCharacters: Int = StreamAccumulator.defaultMaximumCharacters) {
+        self.maximumCharacters = max(1, maximumCharacters)
+    }
 
     /// Returns `true` when the text changed.
     @discardableResult
     public mutating func consume(_ event: StreamEvent) throws -> Bool {
         switch event {
         case .delta(let piece):
+            guard characterCount + piece.count <= maximumCharacters else {
+                throw TajpoError.outputTruncated
+            }
             text += piece
+            characterCount += piece.count
             return true
         case .finished(let reason):
             finishReason = reason
@@ -72,15 +82,18 @@ public struct StreamAccumulator: Sendable {
 
     /// The final text, or an error if the output is unusable for replacement.
     public func result() throws -> String {
+        guard sawDone else { throw TajpoError.incompleteResponse }
         switch finishReason {
+        case "stop":
+            break
         case "length":
             throw TajpoError.outputTruncated
         case "content_filter":
             throw TajpoError.contentFiltered
-        case nil where !sawDone:
+        case .some(let reason):
+            throw TajpoError.api("The model stopped with an unsupported reason (\(reason)). The result cannot be replaced safely.")
+        case nil:
             throw TajpoError.incompleteResponse
-        default:
-            break
         }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TajpoError.emptyResponse
