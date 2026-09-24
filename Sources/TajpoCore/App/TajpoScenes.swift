@@ -129,6 +129,11 @@ struct MenuBarView: View {
                     Task { await model.checkForUpdates(quiet: false) }
                 }
                 Spacer()
+                Button {
+                    model.openOnboarding()
+                } label: {
+                    Label("Setup Guide", systemImage: "sparkles")
+                }
                 SettingsLink {
                     Text("Settings")
                 }
