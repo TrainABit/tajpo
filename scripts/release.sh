@@ -30,7 +30,11 @@ cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
 # Ship the SwiftPM resource bundle in both locations used by packaged apps.
 # DemoLexiconLoader also has a safe fallback, but keeping the bundle intact
 # makes the on-device demo deterministic and keeps release verification honest.
-RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 4 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+if [[ ! -d "$RESOURCE_BUNDLE/Contents" ]]; then
+  # Some Swift toolchains place the bundle in a sibling build directory.
+  RESOURCE_BUNDLE="$(find "$ROOT/.build" -type d -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
+fi
 if [[ -n "$RESOURCE_BUNDLE" && -d "$RESOURCE_BUNDLE/Contents" ]]; then
   copy_resource_bundle() {
     local destination="$1"
