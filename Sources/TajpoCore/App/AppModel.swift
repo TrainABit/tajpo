@@ -108,11 +108,20 @@ public final class AppModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(1.5))
             }
         }
-        if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
+        if CommandLine.arguments.contains("-TajpoSetup") {
+            openOnboarding()
+        } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
             settings.onboardingStep = min(max(settings.onboardingStep, 0), 4)
             OnboardingController.shared.show(model: self)
         }
         Task { await checkForUpdates(quiet: true) }
+    }
+
+    /// Reopens the guided setup even after onboarding has been completed.
+    public func openOnboarding() {
+        settings.onboardingStep = 0
+        UserDefaults.standard.set(false, forKey: "completedOnboarding")
+        OnboardingController.shared.show(model: self)
     }
 
     public func configureHotkey() {
