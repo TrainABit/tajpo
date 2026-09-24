@@ -12,8 +12,15 @@ cp "$BIN_DIR/Tajpo" "$APP/Contents/MacOS/Tajpo"
 cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.trainabit.tajpo' "$APP/Contents/Info.plist"
 RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
-if [[ -n "$RESOURCE_BUNDLE" ]]; then
-  ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
+if [[ -n "$RESOURCE_BUNDLE" && -d "$RESOURCE_BUNDLE/Contents" ]]; then
+  RESOURCE_DEST="$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
+  rm -rf "$RESOURCE_DEST"
+  mkdir -p "$RESOURCE_DEST"
+  # Preserve the macOS bundle layout explicitly; do not let a flat copy reach
+  # Bundle.module, which is fatal when Contents/Info.plist is missing.
+  ditto "$RESOURCE_BUNDLE/Contents" "$RESOURCE_DEST/Contents"
+  test -f "$RESOURCE_DEST/Contents/Info.plist"
+  test -f "$RESOURCE_DEST/Contents/Resources/demo-lexicon.json"
 fi
 # Keep a direct copy for ad-hoc preview bundles; the loader supports both layouts.
 cp "$ROOT/Sources/TajpoCore/Resources/demo-lexicon.json" "$APP/Contents/Resources/demo-lexicon.json"
