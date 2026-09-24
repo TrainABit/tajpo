@@ -150,6 +150,7 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
           VERSION: ${{ needs.build.outputs.version }}
+          COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           set -euo pipefail
           : "${NOTARY_KEY_P8_BASE64:?Missing NOTARY_KEY_P8_BASE64}"
@@ -195,6 +196,17 @@ jobs:
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
           hdiutil verify "$DMG"
           (cd "$OUT" && shasum -a 256 "Tajpo-$VERSION.dmg" > "Tajpo-$VERSION.dmg.sha256")
+          python3 - "$OUT/Tajpo-$VERSION.dmg.sha256" release-input/Tajpo-release-manifest.json "$COMMIT" <<'PY'
+          import json, pathlib, sys
+          checksum_file, manifest_file, commit = sys.argv[1:]
+          checksum = pathlib.Path(checksum_file).read_text(encoding="utf-8").split()[0]
+          data = json.loads(pathlib.Path(manifest_file).read_text(encoding="utf-8"))
+          data["commit"] = commit
+          data["dmg_sha256"] = checksum
+          data["signed"] = True
+          data["notarized"] = True
+          pathlib.Path(manifest_file).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+          PY
           cp release-input/Tajpo-*.dSYM.zip "$OUT/"
           cp release-input/Tajpo-release-manifest.json "$OUT/"
 

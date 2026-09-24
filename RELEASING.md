@@ -27,7 +27,7 @@
 2. Resolve the open licensing, privacy, bundle-ID and support decisions above. `scripts/release-preflight.sh` fails closed while `PRIVACY.md` is a draft or the cask still contains a placeholder.
 3. Run the manual QA matrix below on at least one Apple Silicon Mac and, ideally, one Intel Mac.
 4. Protect `main`, push the release commit, then create and push the tag: `git tag v0.3.0 && git push origin v0.3.0`.
-5. Manually dispatch **Release** with that exact tag. The workflow requires the tag to equal the current `origin/main` commit, builds and tests without secrets, signs/notarizes only the downloaded artifact, and creates a draft release.
+5. Manually dispatch **Release** with that exact tag. The workflow requires the tag to equal the current `origin/main` commit, builds and tests without secrets, signs/notarizes only the downloaded artifact, records the signed DMG checksum in the provenance manifest, and creates a draft release.
 6. On a clean Mac (or VM), download the DMG through a browser and open it. Expect only the standard "downloaded from the Internet" prompt.
 7. Publish the draft release. Update the Homebrew tap only after its checksum has been verified.
 
