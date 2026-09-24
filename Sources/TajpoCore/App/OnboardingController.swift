@@ -18,7 +18,7 @@ final class OnboardingController {
             self?.window?.close()
             self?.window = nil
         })
-        let size = NSSize(width: 880, height: 590)
+        let size = NSSize(width: 860, height: 540)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -148,7 +148,7 @@ private struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 880, minHeight: 590)
+        .frame(minWidth: 860, minHeight: 540)
         .background(Color(nsColor: .windowBackgroundColor))
         .tint(TajpoTheme.copper)
         .onAppear { model.refreshSystemState() }
