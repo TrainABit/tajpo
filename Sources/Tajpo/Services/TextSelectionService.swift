@@ -43,7 +43,7 @@ final class TextSelectionService {
     }
 
     private let systemWideElement: AXUIElement
-    private static let axTimeout: CFTimeInterval = 0.10
+    private static let axTimeout: Float = 0.10
     private var isBusy = false
     private var didPromptThisLaunch = false
 
