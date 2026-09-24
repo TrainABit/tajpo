@@ -1,6 +1,6 @@
-# Tajpo: Full Repository Audit
+# Tajpo: Full Repository Audit (historical)
 
-Audited commit `419128e` (`main`, after PR #1) on 2026-09-22. No source files were changed. Code fixes quoted here were checked in a scratch copy.
+> This document records the audit of commit `419128e` on 2026-09-22. The repository has changed substantially since then; use the current CI, `CHANGELOG.md`, and `RELEASING.md` for release status. The findings below are retained as implementation history, not as a current claim that every old item is still open or closed.
 
 > **TL;DR.** The code **does not compile.** There are 4 errors, checked against the real macOS SDKs, and 3 of them came in with the previous automated audit (PR #1). Even after it builds, it **isn't a real app yet.** It is a bare SwiftPM binary, so Accessibility and Keychain access reset on every rebuild, the Dock icon flashes, and some README steps can't be done. The core **Replace step can damage text.** Output can be cut short without warning, newlines get stripped, the text can land in the wrong place, a race enables Replace while text is still streaming, and the paste can end up in Tajpo's own panel. The default **prompts contradict each other.** **First-run setup** has four hard failures. Each item below has a file:line, a failure scenario and a fix. A small checked patch for the build errors (4 files, about 8 lines) is in [Appendix C](#appendix-c-verified-build-fix-patch).
 

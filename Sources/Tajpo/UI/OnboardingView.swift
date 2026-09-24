@@ -70,6 +70,7 @@ struct OnboardingView: View {
     // Connect
     @State private var keyField = ""
     @State private var keyStatus: KeyStatus = .idle
+    @State private var connectionGeneration = UUID()
     @State private var showLocalOption = false
 
     // Try it
@@ -97,38 +98,34 @@ struct OnboardingView: View {
         settings = model.settings
     }
 
-    static let size = CGSize(width: 840, height: 580)
+    static let size = CGSize(width: 800, height: 600)
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            VStack(alignment: .leading, spacing: 16) {
-                if resumed {
-                    Label("Welcome back. Pick up where you left off.", systemImage: "arrow.uturn.forward")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                GeometryReader { proxy in
-                    ScrollView {
-                        content
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.bottom, 8)
-                            // Short steps sit in the middle instead of leaving a gap above the buttons.
-                            .frame(minHeight: proxy.size.height, alignment: centersContent ? .center : .top)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                }
-                .scrollIndicators(.automatic)
-                .id(step)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .opacity))
-                navigation
+        VStack(spacing: 0) {
+            setupHeader
+            progressHeader
+            if resumed {
+                resumedBanner
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 40)
-            .padding(.bottom, 26)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            GeometryReader { proxy in
+                ScrollView {
+                    content
+                        .frame(maxWidth: 660, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
+                        // Keep short steps visually settled instead of leaving a large empty field.
+                        .frame(minHeight: proxy.size.height, alignment: centersContent ? .center : .top)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+            .scrollIndicators(.automatic)
+            .id(step)
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 10)), removal: .opacity))
+            navigation
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay {
             if step == .done && missingItems.isEmpty && !reduceMotion {
                 Confetti().allowsHitTesting(false)
@@ -158,99 +155,104 @@ struct OnboardingView: View {
         }
         .onReceive(poll) { _ in
             guard step == .everywhere else { return }
-            model.refreshStatus()
+            model.refreshStatus(includeKeychain: false)
             if model.accessibilityTrusted && !grantCelebrated { accessGranted() }
         }
     }
 
     private var centersContent: Bool {
-        step == .welcome || step == .done
+        step == .welcome || step == .connect || step == .tryIt || step == .done
     }
 
-    // MARK: Sidebar
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 40, height: 40)
-                    // The icon shares the sidebar's colors; a light rim keeps it from blending in.
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.55), lineWidth: 1).padding(4))
-                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Tajpo").font(.title2.bold())
-                    Text("Setup").font(.callout).opacity(0.75)
-                }
+    private var setupHeader: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Set up Tajpo")
+                    .font(.title3.weight(.semibold))
+                Text("A few quick steps, then you're ready to write")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.top, 50)
-            .padding(.bottom, 30)
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(OnboardingStep.allCases) { item in
-                    stepRow(item)
-                }
-            }
-            Spacer()
-            Label(step == .done ? (missingItems.isEmpty ? "All set" : "Almost there") : "About 3 minutes",
-                  systemImage: step == .done && missingItems.isEmpty ? "checkmark.circle" : "clock")
-                .font(.callout)
-                .opacity(0.8)
+            Spacer(minLength: 16)
+            Text("Step \(step.rawValue + 1) of \(OnboardingStep.allCases.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 26)
-        .frame(width: 236, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .foregroundStyle(.white)
-        .background(Brand.gradient)
-        .environment(\.colorScheme, .dark)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Setup step \(step.rawValue + 1) of \(OnboardingStep.allCases.count), \(step.label)")
+        .padding(.horizontal, 32)
+        .padding(.top, 42)
+        .padding(.bottom, 12)
     }
 
-    private func stepRow(_ item: OnboardingStep) -> some View {
-        let current = item == step
-        let reachable = item.rawValue < step.rawValue
-        let done = reachable && isComplete(item)
-        return Button {
-            if reachable { step = item }
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(current ? Color.white : Color.white.opacity(done ? 0.3 : 0.14))
-                    if done {
-                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
-                    } else {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(current ? Brand.indigo : .white)
+    private var progressHeader: some View {
+        HStack(spacing: 0) {
+            ForEach(OnboardingStep.allCases) { item in
+                let current = item == step
+                let done = item.rawValue < step.rawValue && isComplete(item)
+                Button {
+                    if item.rawValue < step.rawValue { step = item }
+                } label: {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(current ? Brand.accent : done ? Brand.accent.opacity(0.16) : Color.primary.opacity(0.07))
+                            if done {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(Brand.accent)
+                            } else {
+                                Image(systemName: item.symbol)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(current ? Color.white : Brand.accent)
+                            }
+                        }
+                        .frame(width: 22, height: 22)
+                        Text(item.label)
+                            .font(.caption.weight(current ? .semibold : .regular))
+                            .foregroundStyle(current ? Color.primary : Color.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.label).fontWeight(current ? .semibold : .medium)
-                    Text(item.detail).font(.caption).opacity(0.7)
+                .buttonStyle(.plain)
+                .disabled(item.rawValue >= step.rawValue)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(item.label)\(done ? ", complete" : "")\(current ? ", current step" : "")")
+
+                if item != .done {
+                    Rectangle()
+                        .fill(item.rawValue < step.rawValue ? Brand.accent.opacity(0.45) : Color.primary.opacity(0.12))
+                        .frame(height: 2)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(current ? 0.16 : 0)))
-            .opacity(current || reachable ? 1 : 0.72)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .allowsHitTesting(reachable)
-        .accessibilityLabel("\(item.label)\(done ? ", done" : "")\(current ? ", current step" : "")")
+        .padding(.horizontal, 32)
+        .padding(.bottom, 18)
+    }
+
+    private var resumedBanner: some View {
+        Label("Welcome back. Pick up where you left off.", systemImage: "arrow.uturn.forward")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func isComplete(_ item: OnboardingStep) -> Bool {
         switch item {
-        case .welcome: true
-        case .connect: !model.needsAPIKey && keyStatus != .checking
-        case .tryIt: practice.fixes != nil
-        case .everywhere: model.accessibilityTrusted
-        case .done: false
+        case .welcome: return true
+        case .connect:
+            if model.isDemo { return true }
+            if settings.usesOpenAI { return model.apiKeyValidated && keyStatus != .checking }
+            return keyStatus == .connected
+        case .tryIt: return practice.fixes != nil
+        case .everywhere: return model.accessibilityTrusted
+        case .done: return false
         }
     }
 
@@ -268,8 +270,8 @@ struct OnboardingView: View {
     }
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text("Better writing, in any app")
                     .font(.system(size: 30, weight: .bold))
                 Text("Select text, press a shortcut, and Tajpo fixes, polishes, shortens, or changes its tone right where you're writing.")
@@ -277,11 +279,15 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            DemoAnimation()
-            VStack(alignment: .leading, spacing: 12) {
-                feature("macwindow.on.rectangle", "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
-                feature("eye", "You approve every change", "See the result first. Nothing changes until you press Replace.")
-                feature("lock.shield", "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
+            HStack(alignment: .top, spacing: 26) {
+                VStack(alignment: .leading, spacing: 14) {
+                    feature("macwindow.on.rectangle", "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
+                    feature("eye", "You approve every change", "See the result first. Nothing changes until you press Replace.")
+                    feature("lock.shield", "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                DemoAnimation()
+                    .frame(maxWidth: 300)
             }
         }
     }
@@ -306,7 +312,7 @@ struct OnboardingView: View {
             if settings.usesOpenAI {
                 StepHeader(symbol: "key.fill", tint: Brand.accent, title: "Connect your OpenAI account",
                            subtitle: "Tajpo runs on your own API key. Your text goes straight from your Mac to OpenAI, never to us.")
-                if let hint = model.apiKeyHint, keyField.isEmpty, keyStatus == .idle || keyStatus == .connected {
+                if let hint = model.apiKeyHint, keyField.isEmpty, model.apiKeyValidated, (keyStatus == .idle || keyStatus == .connected) {
                     Label("Connected · \(hint)", systemImage: "checkmark.seal.fill")
                         .font(.headline)
                         .foregroundStyle(.green)
@@ -320,8 +326,9 @@ struct OnboardingView: View {
                         HStack(alignment: .center, spacing: 8) {
                             numberBadge(3)
                             Text("Paste it here")
-                            SecureField("sk-…", text: $keyField)
+                            SecureField("OpenAI API key", text: $keyField)
                                 .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("OpenAI API key")
                             Button("Paste Key") { pasteKey() }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(keyStatus == .checking)
@@ -425,6 +432,7 @@ struct OnboardingView: View {
                 KeyCaps(shortcut: settings.rewriteShortcut)
             }
             TextEditor(text: $practice.text)
+                .accessibilityLabel("Practice text")
                 .font(.title3)
                 .frame(height: 70)
                 .scrollIndicators(.never)
@@ -569,11 +577,11 @@ struct OnboardingView: View {
                         Text(loginMessage).font(.caption).foregroundStyle(.orange)
                     }
                 } else if AppLocation.isTemporary {
-                    Label("Tajpo is running from a temporary location. Move it to Applications so it can start at login.", systemImage: "folder")
+                    Label("Tajpo is running from a temporary location. Drag it from Finder into Applications so it can start at login.", systemImage: "folder")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
-                Toggle("Check for new versions weekly (asks GitHub for the latest version number, nothing else)", isOn: $checkUpdates)
+                Toggle("Check for new versions weekly (asks GitHub for the latest version and product name)", isOn: $checkUpdates)
             }
             .card()
             Label("Tajpo lives in your menu bar, where you'll find settings, presets, and this guide.", systemImage: "menubar.arrow.up.rectangle")
@@ -584,7 +592,13 @@ struct OnboardingView: View {
 
     private var missingItems: [(title: String, step: OnboardingStep)] {
         var items: [(String, OnboardingStep)] = []
-        if model.needsAPIKey { items.append(("Add your OpenAI key (needed to edit text)", .connect)) }
+        if model.isDemo {
+            // Demo scenes intentionally do not require a real credential.
+        } else if settings.usesOpenAI {
+            if model.needsAPIKey { items.append(("Add and validate your OpenAI key (needed to edit text)", .connect)) }
+        } else if keyStatus != .connected {
+            items.append(("Check your AI server connection", .connect))
+        }
         if !model.accessibilityTrusted { items.append(("Allow Tajpo in other apps (Accessibility)", .everywhere)) }
         if settings.rewriteShortcut == nil || model.hotkeyErrors[.rewrite] != nil { items.append(("Choose a working shortcut", .tryIt)) }
         return items
@@ -609,8 +623,13 @@ struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .disabled(keyStatus == .checking)
         }
-        .controlSize(.large)
-        .padding(.top, 4)
+        .controlSize(.regular)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 14)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     private var skipTitle: String? {
@@ -624,24 +643,32 @@ struct OnboardingView: View {
 
     private var primaryTitle: String {
         switch step {
-        case .welcome: "Get Started"
-        case .connect: (!model.needsAPIKey && keyField.isEmpty) ? "Continue" : "Check Key"
-        case .tryIt: "Continue"
-        case .everywhere: model.accessibilityTrusted ? "Continue" : "Open System Settings"
-        case .done: missingItems.isEmpty ? "Start Writing" : "Finish Later"
+        case .welcome: return "Get Started"
+        case .connect:
+            if model.isDemo { return "Continue" }
+            if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Check Key" }
+            if settings.usesOpenAI, model.apiKeyHint != nil, !model.apiKeyValidated { return "Test Saved Key" }
+            return isComplete(.connect) ? "Continue" : "Check Connection"
+        case .tryIt: return "Continue"
+        case .everywhere: return model.accessibilityTrusted ? "Continue" : "Open System Settings"
+        case .done: return missingItems.isEmpty ? "Start Writing" : "Finish Later"
         }
     }
 
     private func primaryAction() {
         switch step {
         case .connect:
-            if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Return in the key field lands here: save and check instead of dropping the key.
-                checkKey()
-            } else if model.needsAPIKey {
-                keyStatus = .warning("Paste your API key first, or choose “I'll Do This Later”.")
-            } else {
+            if model.isDemo {
                 move(1)
+            } else if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Return in the key field lands here: test and save instead of dropping the key.
+                checkKey()
+            } else if settings.usesOpenAI, model.apiKeyHint != nil, !model.apiKeyValidated {
+                checkConnection()
+            } else if isComplete(.connect) {
+                move(1)
+            } else {
+                keyStatus = .warning("Paste your API key first, or choose “I’ll Do This Later”.")
             }
         case .everywhere:
             if model.accessibilityTrusted {
@@ -670,7 +697,9 @@ struct OnboardingView: View {
                 return
             }
         }
-        model.updates.automatic = checkUpdates
+        if checkUpdates != model.updates.automatic {
+            model.updates.automatic = checkUpdates
+        }
         savedStep = 0
         model.completeOnboarding()
         model.celebrateMenuBarIcon()
@@ -681,13 +710,15 @@ struct OnboardingView: View {
         case .tryIt:
             model.localTextProvider = practice
         case .done:
-            launchAtLogin = LaunchAtLogin.isAvailable
+            launchAtLogin = LaunchAtLogin.isAvailable ? model.launchAtLoginEnabled : false
+            checkUpdates = model.updates.automatic
         default:
             break
         }
     }
 
     private func leave(_ step: OnboardingStep) {
+        if step == .connect { connectionGeneration = UUID() }
         if step == .tryIt { model.localTextProvider = nil }
     }
 
@@ -704,30 +735,40 @@ struct OnboardingView: View {
 
     private func checkKey() {
         let trimmed = keyField.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
+        guard !trimmed.isEmpty else { return }
+        let generation = UUID()
+        connectionGeneration = generation
+        keyStatus = .checking
+        Task {
             do {
-                try model.saveAPIKey(trimmed)
+                try await model.saveAndValidateAPIKey(trimmed)
+                guard connectionGeneration == generation else { return }
+                keyField = ""
+                keyStatus = .connected
+                try? await Task.sleep(for: .seconds(1))
+                if connectionGeneration == generation, step == .connect { move(1) }
             } catch {
-                keyStatus = .failure(AppModel.map(error).localizedDescription, nil)
-                return
-            }
-            keyField = ""
-            if !APIKeyValidator.looksLikeOpenAIKey(trimmed) {
-                keyStatus = .warning("Saved, but this doesn't look like an OpenAI key (they start with “sk-”). Check it if the connection fails.")
+                guard connectionGeneration == generation else { return }
+                // The previous key remains in Keychain because validation
+                // happens before saveAndValidateAPIKey writes the candidate.
+                keyStatus = Self.friendly(AppModel.map(error))
             }
         }
-        checkConnection()
     }
 
     private func checkConnection() {
+        let generation = UUID()
+        connectionGeneration = generation
         keyStatus = .checking
         Task {
             do {
                 try await model.testConnection()
+                guard connectionGeneration == generation else { return }
                 keyStatus = .connected
                 try? await Task.sleep(for: .seconds(1))
-                if step == .connect { move(1) }
+                if connectionGeneration == generation, step == .connect { move(1) }
             } catch {
+                guard connectionGeneration == generation else { return }
                 keyStatus = Self.friendly(AppModel.map(error))
             }
         }
@@ -826,18 +867,19 @@ private struct StepHeader: View {
     let subtitle: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(RoundedRectangle(cornerRadius: 10).fill(tint.gradient))
+                .frame(width: 36, height: 36)
+                .background(RoundedRectangle(cornerRadius: 9).fill(tint))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

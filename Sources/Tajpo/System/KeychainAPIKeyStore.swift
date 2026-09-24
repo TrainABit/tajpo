@@ -11,17 +11,26 @@ protocol APIKeyStoring: Sendable {
 }
 
 struct KeychainAPIKeyStore: APIKeyStoring {
-    static let service = "com.trainabit.tajpo"
+    static let defaultService = "com.trainabit.tajpo"
+    /// Test bundles and development builds get an isolated Keychain service.
+    static var service: String { Bundle.main.bundleIdentifier ?? defaultService }
     /// Service name used by versions before 0.2; migrated on first load.
     static let legacyService = "com.tajpo.app"
     private let account = "openai-api-key"
 
+    private var migrationServices: [String] {
+        Self.service == Self.defaultService ? [Self.service, Self.legacyService] : [Self.service]
+    }
+
     func load() throws -> String? {
         if let key = try read(service: Self.service) { return key }
-        guard let legacy = try read(service: Self.legacyService) else { return nil }
-        try save(legacy)
-        try? deleteItem(service: Self.legacyService)
-        return legacy
+        for legacyService in migrationServices where legacyService != Self.service {
+            guard let legacy = try read(service: legacyService) else { continue }
+            try save(legacy)
+            try? deleteItem(service: legacyService)
+            return legacy
+        }
+        return nil
     }
 
     func save(_ value: String) throws {
@@ -42,12 +51,11 @@ struct KeychainAPIKeyStore: APIKeyStoring {
     }
 
     func delete() throws {
-        try deleteItem(service: Self.service)
-        try deleteItem(service: Self.legacyService)
+        for service in migrationServices { try deleteItem(service: service) }
     }
 
     func savedKeyHint() -> String? {
-        for service in [Self.service, Self.legacyService] {
+        for service in migrationServices {
             var request = query(service: service)
             request[kSecReturnAttributes as String] = true
             request[kSecMatchLimit as String] = kSecMatchLimitOne

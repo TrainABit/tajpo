@@ -8,13 +8,15 @@ struct TextCapture {
 
     let text: String
     let method: Method
-    /// The focused element, when the text was read through Accessibility.
+    /// The focused element, when the text was read through Accessibility or
+    /// could be verified again after a clipboard capture.
     let element: AXUIElement?
     let selectedRange: CFRange?
     let sourceApp: NSRunningApplication?
     /// Selection bounds in Cocoa screen coordinates, if the app reports them.
     let bounds: CGRect?
-    /// Why Replace isn't possible (read-only text, terminals), or nil.
+    /// Why Replace isn't possible (read-only text, terminals, or an
+    /// unverifiable clipboard target), or nil.
     let replaceBlocker: TajpoError?
 
     var canReplace: Bool { replaceBlocker == nil }
@@ -23,20 +25,31 @@ struct TextCapture {
 enum ReplaceOutcome {
     /// The app's text was read back and contains the replacement.
     case verified
-    /// The replacement was sent but couldn't be confirmed.
-    case unverified
+    /// AX reported success but the target could not be verified; no paste was sent.
+    case axUnverified
 }
 
-/// Reads and replaces the selection in other apps: Accessibility first,
-/// synthetic ⌘C/⌘V as the fallback.
+/// Reads selections in other apps. Synthetic ⌘C is used only to read a
+/// clipboard-only target; replacement is Accessibility-only and fails closed
+/// when the target cannot be verified.
 @MainActor
 final class TextSelectionService {
+    private struct ClipboardCapture {
+        let text: String
+        let element: AXUIElement?
+        let selectedRange: CFRange?
+        let sourceApp: NSRunningApplication?
+        let hasRichTypes: Bool
+    }
+
+    private let systemWideElement: AXUIElement
+    private static let axTimeout: Float = 0.10
     private var isBusy = false
     private var didPromptThisLaunch = false
 
     init() {
-        // The default 6 s timeout per call would freeze Tajpo when the target app hangs.
-        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.75)
+        systemWideElement = AXUIElementCreateSystemWide()
+        configure(systemWideElement)
     }
 
     var isTrusted: Bool { AXIsProcessTrusted() }
@@ -84,16 +97,21 @@ final class TextSelectionService {
             Log.selection.debug("AX selection empty or unsupported; trying the clipboard")
         }
 
-        let text = try await copySelectionWithClipboard()
-        try SelectionValidator.validate(text)
+        let clipboard = try await copySelectionWithClipboard(expectedApp: frontmost)
+        try SelectionValidator.validate(clipboard.text)
+        // A clipboard capture is only replaceable if we can re-identify the
+        // focused element and selected text. Otherwise Copy is the safe mode.
+        let blocker: TajpoError? = terminalBlocker
+            ?? (clipboard.element == nil || !isEditable(clipboard.element!) || clipboard.hasRichTypes
+                ? .replaceNotSupported : nil)
         return TextCapture(
-            text: text,
+            text: clipboard.text,
             method: .clipboard,
-            element: nil,
-            selectedRange: nil,
-            sourceApp: frontmost,
+            element: clipboard.element,
+            selectedRange: clipboard.selectedRange,
+            sourceApp: clipboard.sourceApp ?? frontmost,
             bounds: nil,
-            replaceBlocker: terminalBlocker
+            replaceBlocker: blocker
         )
     }
 
@@ -101,124 +119,123 @@ final class TextSelectionService {
 
     /// Replaces the captured selection with `text`. `hidePanel` is called
     /// before any synthetic paste so the keystroke reaches the source app.
-    func replace(with text: String, capture: TextCapture, hidePanel: () -> Void) async throws -> ReplaceOutcome {
+    func replace(with text: String, capture: TextCapture) async throws -> ReplaceOutcome {
         if let blocker = capture.replaceBlocker { throw blocker }
-        if let app = capture.sourceApp, app.isTerminated { throw TajpoError.targetAppChanged }
+        guard let app = capture.sourceApp, !app.isTerminated else { throw TajpoError.targetAppChanged }
+        try Task.checkCancellation()
+        try ensureFrontmost(app)
 
         if let element = capture.element {
             try rejectSecure(element)
             try ensureSelectionUnchanged(element, capture: capture)
-            let before = fieldValue(element)
-            if AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success {
-                switch verify(element, inserted: text, original: capture.text, before: before) {
+            let status = setAttribute(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+            if status == .success {
+                switch verify(element, inserted: text, capture: capture) {
                 case .inserted: return .verified
-                case .unknown: return .unverified
-                case .unchanged: Log.selection.info("AX set reported success but changed nothing; pasting instead")
+                case .unknown: return .axUnverified
+                case .unchanged: Log.selection.info("AX set reported success but changed nothing; leaving the result available to copy")
                 }
             }
         }
-        return try await paste(text, capture: capture, hidePanel: hidePanel)
-    }
-
-    private func paste(_ text: String, capture: TextCapture, hidePanel: () -> Void) async throws -> ReplaceOutcome {
-        hidePanel()
-        if let app = capture.sourceApp {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
-                app.activate(from: NSRunningApplication.current, options: [])
-            }
-            guard await waitUntilFrontmost(app) else { throw TajpoError.targetAppChanged }
-        }
-        // Let key focus return from the panel to the source window.
-        try? await Task.sleep(for: .milliseconds(120))
-        if let element = capture.element {
-            try ensureSelectionUnchanged(element, capture: capture)
-        }
-
-        let pasteboard = NSPasteboard.general
-        if pasteboard.deniesProgrammaticAccess { throw TajpoError.pasteboardAccessDenied }
-        let snapshot = ClipboardSnapshot(pasteboard)
-        guard pasteboard.writeTransient(text) else { throw TajpoError.pasteboardUnavailable }
-        let written = pasteboard.changeCount
-
-        let valueBeforePaste = capture.element.flatMap(fieldValue)
-        await Keyboard.waitForModifierRelease()
-        Keyboard.postCommandShortcut("v", fallback: CGKeyCode(kVK_ANSI_V))
-
-        var outcome = ReplaceOutcome.unverified
-        if let element = capture.element {
-            // Never restore sooner than this: the app may read the pasteboard late.
-            try? await Task.sleep(for: .milliseconds(300))
-            let deadline = ContinuousClock.now + .milliseconds(1500)
-            while ContinuousClock.now < deadline {
-                if case .inserted = verify(element, inserted: text, original: capture.text, before: valueBeforePaste) {
-                    outcome = .verified
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-        } else {
-            // No way to observe the paste; give slow apps time before restoring.
-            try? await Task.sleep(for: .milliseconds(900))
-        }
-        // Only restore if nobody (the user, another app) wrote to it meanwhile.
-        if pasteboard.changeCount == written {
-            snapshot.restore(to: pasteboard)
-        }
-        return outcome
+        // Synthetic paste is intentionally never used as a fallback. A
+        // clipboard-only or unresponsive target may be an unknown terminal,
+        // where multiline text can become commands. Keep the result available
+        // for Copy and ask the user to paste it deliberately.
+        return .axUnverified
     }
 
     // MARK: Clipboard capture
 
-    private func copySelectionWithClipboard() async throws -> String {
+    private func copySelectionWithClipboard(expectedApp: NSRunningApplication?) async throws -> ClipboardCapture {
         let pasteboard = NSPasteboard.general
         if pasteboard.deniesProgrammaticAccess { throw TajpoError.pasteboardAccessDenied }
         await Keyboard.waitForModifierRelease()
-        let snapshot = ClipboardSnapshot(pasteboard)
+        try Task.checkCancellation()
+        let current = NSWorkspace.shared.frontmostApplication
+        if let expectedApp, current?.processIdentifier != expectedApp.processIdentifier {
+            throw TajpoError.targetAppChanged
+        }
+
+        let originalCount = pasteboard.changeCount
+        guard let snapshot = ClipboardSnapshot(pasteboard) else { throw TajpoError.pasteboardUnavailable }
+        guard pasteboard.changeCount == originalCount else { throw TajpoError.pasteboardUnavailable }
         pasteboard.clearContents()
         let cleared = pasteboard.changeCount
+        try Task.checkCancellation()
+        try ensureFrontmost(current)
         Keyboard.postCommandShortcut("c", fallback: CGKeyCode(kVK_ANSI_C))
 
         let deadline = ContinuousClock.now + .seconds(1)
         while pasteboard.changeCount == cleared, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
+            try await Task.sleep(for: .milliseconds(20))
         }
-        var text: String?
         let observed = pasteboard.changeCount
+        var text: String?
+        var hasRichTypes = false
         if observed != cleared {
             let types = pasteboard.types ?? []
+            hasRichTypes = types.contains { type in
+                let raw = type.rawValue.lowercased()
+                return raw.contains("rtf") || raw.contains("html") || raw.contains("webarchive") || raw.contains("web.archive")
+            }
             // A file copy (e.g. in Finder) also carries the file name as text.
             if !types.contains(.fileURL) {
                 text = pasteboard.string(forType: .string)
             }
         }
-        // Restore unless someone else wrote to the pasteboard after the copy we saw.
-        if pasteboard.changeCount == observed {
+
+        // Best effort: re-write the observed text with transient/concealed
+        // markers before restoring the user's original clipboard. The source
+        // app created the item, so a clipboard manager may already have seen
+        // it; the privacy copy must not claim otherwise.
+        var restoreCount = observed
+        if pasteboard.changeCount == observed, let text, pasteboard.writeTransient(text) {
+            restoreCount = pasteboard.changeCount
+        }
+        // Restore only if no other process wrote after our observation or
+        // marker write. A changed count is intentionally left untouched.
+        if pasteboard.changeCount == restoreCount {
             snapshot.restore(to: pasteboard)
         }
         guard let text else { throw TajpoError.noSelection }
-        return text
+
+        let verifiedElement = focusedElement(in: current)
+        let verifiedText = verifiedElement.flatMap { selectedText(of: $0) }
+        let verifiedRange = verifiedElement.flatMap { selectedRange(of: $0) }
+        let element = (verifiedText?.trimmingCharacters(in: .whitespacesAndNewlines) == text.trimmingCharacters(in: .whitespacesAndNewlines)) ? verifiedElement : nil
+        return ClipboardCapture(
+            text: text,
+            element: element,
+            selectedRange: element == nil ? nil : verifiedRange,
+            sourceApp: current,
+            hasRichTypes: hasRichTypes
+        )
     }
 
     // MARK: Accessibility helpers
 
     private func focusedElement(in app: NSRunningApplication?) -> AXUIElement? {
-        if let element = elementAttribute(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) {
+        if let element = elementAttribute(systemWideElement, kAXFocusedUIElementAttribute),
+           app == nil || runningApp(for: element)?.processIdentifier == app?.processIdentifier {
             return element
         }
         guard let app else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        configure(appElement)
         if let element = elementAttribute(appElement, kAXFocusedUIElementAttribute) {
             return element
         }
         // Electron apps only expose their UI after an assistive app asks.
-        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        _ = setAttribute(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         return elementAttribute(appElement, kAXFocusedUIElementAttribute)
     }
 
     private func rejectSecure(_ element: AXUIElement) throws {
-        var current: AXUIElement? = element
+        var current: AXUIElement?
         var depth = 0
-        while let node = current, depth < 10 {
+        current = element
+        while let node = current, depth < 6 {
+            try Task.checkCancellation()
             let role = stringAttribute(node, kAXRoleAttribute) ?? ""
             let subrole = stringAttribute(node, kAXSubroleAttribute) ?? ""
             let description = stringAttribute(node, kAXRoleDescriptionAttribute) ?? ""
@@ -252,18 +269,18 @@ final class TextSelectionService {
 
     private func selectedRange(of element: AXUIElement) -> CFRange? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+        guard copyAttribute(element, kAXSelectedTextRangeAttribute as CFString, into: &value),
               let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var range = CFRange()
         return AXValueGetValue(value as! AXValue, .cfRange, &range) ? range : nil
     }
 
     private func selectionBounds(of element: AXUIElement) -> CGRect? {
-        var rangeValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
-              let rangeValue else { return nil }
+        guard let rangeValue = selectedRange(of: element) else { return nil }
+        var range = rangeValue
+        let value = AXValueCreate(.cfRange, &range)!
         var boundsValue: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString, rangeValue, &boundsValue) == .success,
+        guard AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString, value, &boundsValue) == .success,
               let boundsValue, CFGetTypeID(boundsValue) == AXValueGetTypeID() else { return nil }
         var rect = CGRect.zero
         guard AXValueGetValue(boundsValue as! AXValue, .cgRect, &rect) else { return nil }
@@ -271,56 +288,69 @@ final class TextSelectionService {
         return PanelPlacement.cocoaRect(fromAX: rect, primaryScreenHeight: primaryHeight)
     }
 
-    /// Throws `selectionChanged` unless the element still has the captured
-    /// text selected, re-selecting the captured range if the caret moved.
+    /// Requires the original selected text to still be selected. We never
+    /// re-select a saved range: doing so could move the user's caret silently.
     private func ensureSelectionUnchanged(_ element: AXUIElement, capture: TextCapture) throws {
-        if Self.normalized(selectedText(of: element)) == Self.normalized(capture.text) { return }
-        if var range = capture.selectedRange, let value = AXValueCreate(.cfRange, &range) {
-            AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value)
-            if Self.normalized(selectedText(of: element)) == Self.normalized(capture.text) { return }
+        guard Self.normalized(selectedText(of: element)) == Self.normalized(capture.text) else {
+            throw TajpoError.selectionChanged
         }
-        throw TajpoError.selectionChanged
     }
 
     private enum Verification { case inserted, unchanged, unknown }
 
-    /// The field's full text, if readable and not huge.
-    private func fieldValue(_ element: AXUIElement) -> String? {
-        guard let value = stringAttribute(element, kAXValueAttribute), value.utf16.count < 500_000 else { return nil }
-        return Self.normalized(value)
-    }
-
-    /// `.inserted` only if the field's text changed and now contains the
-    /// replacement; a value that already contained it (e.g. a result equal to
-    /// the original) doesn't count.
-    private func verify(_ element: AXUIElement, inserted text: String, original: String, before: String?) -> Verification {
-        let needle = Self.normalized(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let value = fieldValue(element), value != before, value.contains(needle) {
-            return .inserted
+    private func verify(_ element: AXUIElement, inserted insertedText: String, capture: TextCapture) -> Verification {
+        let text = insertedText
+        let expected = Self.normalized(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = capture.selectedRange {
+            let replacementRange = CFRange(location: range.location, length: text.utf16.count)
+            if let value = textInRange(replacementRange, of: element), Self.normalized(value) == expected {
+                return .inserted
+            }
         }
-        // Nothing happened if the original is still what's selected.
-        if Self.normalized(selectedText(of: element)) == Self.normalized(original) { return .unchanged }
+        if Self.normalized(selectedText(of: element)) == Self.normalized(capture.text) { return .unchanged }
         return .unknown
     }
 
-    private func waitUntilFrontmost(_ app: NSRunningApplication) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(1)
-        while ContinuousClock.now < deadline {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier { return true }
-            try? await Task.sleep(for: .milliseconds(25))
+    private func textInRange(_ range: CFRange, of element: AXUIElement) -> String? {
+        var value = range
+        guard let rangeValue = AXValueCreate(.cfRange, &value) else { return nil }
+        var result: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, "AXStringForRange" as CFString, rangeValue, &result) == .success else { return nil }
+        return result as? String
+    }
+
+    private func ensureFrontmost(_ app: NSRunningApplication?) throws {
+        guard let app, NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+            throw TajpoError.targetAppChanged
         }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+    }
+
+    private func configure(_ element: AXUIElement) {
+        // AX calls run on the main actor in this UI-owned service. Keep each
+        // individual call short; a timeout is converted into the clipboard /
+        // Copy-only path rather than freezing the menu-bar app.
+        AXUIElementSetMessagingTimeout(element, Self.axTimeout)
+    }
+
+    private func setAttribute(_ element: AXUIElement, _ attribute: CFString, _ value: CFTypeRef) -> AXError {
+        configure(element)
+        return AXUIElementSetAttributeValue(element, attribute, value)
+    }
+
+    private func copyAttribute(_ element: AXUIElement, _ attribute: CFString, into value: inout CFTypeRef?) -> Bool {
+        configure(element)
+        return AXUIElementCopyAttributeValue(element, attribute, &value) == .success
     }
 
     private func stringAttribute(_ element: AXUIElement, _ attribute: String) -> String? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+        guard copyAttribute(element, attribute as CFString, into: &value) else { return nil }
         return value as? String
     }
 
     private func elementAttribute(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+        guard copyAttribute(element, attribute as CFString, into: &value),
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }

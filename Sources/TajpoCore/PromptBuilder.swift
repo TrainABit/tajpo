@@ -23,9 +23,10 @@ public enum PromptBuilder {
         tone: RewriteTone,
         preset: WritingPreset?,
         model: String,
-        instruction: String? = nil
+        instruction: String? = nil,
+        tag: String? = nil
     ) -> PromptRequest {
-        let tag = tagName(for: text)
+        let tag = tag ?? tagName(for: text)
         return PromptRequest(
             system: systemPrompt(action: action, tone: tone, preset: preset, tag: tag, instruction: instruction),
             user: "<\(tag)>\n\(text)\n</\(tag)>",
@@ -78,15 +79,13 @@ public enum PromptBuilder {
         return action == .correct ? 0 : 0.3
     }
 
-    /// Picks a delimiter tag that doesn't occur in the text, so the text can't
-    /// close the tag early.
-    public static func tagName(for text: String) -> String {
-        var tag = "text"
-        var counter = 1
-        while text.contains("<\(tag)>") || text.contains("</\(tag)>") {
-            counter += 1
-            tag = "text\(counter)"
-        }
-        return tag
+    /// Picks an unpredictable delimiter that does not occur in the selected
+    /// text. User-controlled text therefore cannot force an unbounded search
+    /// for the next `textN` tag or close the delimiter early.
+    public static func tagName(for text: String, nonce: String = UUID().uuidString) -> String {
+        let safeNonce = nonce.lowercased().filter { $0.isLetter || $0.isNumber }
+        let base = safeNonce.isEmpty ? "text" : "text_\(safeNonce)"
+        guard text.contains("<\(base)>") || text.contains("</\(base)>") else { return base }
+        return "\(base)_\(UUID().uuidString.lowercased().filter { $0.isLetter || $0.isNumber })"
     }
 }

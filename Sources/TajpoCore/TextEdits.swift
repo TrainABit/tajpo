@@ -44,6 +44,30 @@ public enum OutputCleaner {
     }
 }
 
+public enum OutputValidator {
+    /// Validates the text after wrappers and original whitespace have been
+    /// removed. A non-empty selection may never be replaced by an empty or
+    /// whitespace-only result, and a Shorten action may not expand without
+    /// bound.
+    public static func validate(
+        _ text: String,
+        action: RewriteAction,
+        original: String
+    ) throws {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw TajpoError.emptyResponse
+        }
+        guard action == .shorten else { return }
+
+        let originalLength = max(1, original.trimmingCharacters(in: .whitespacesAndNewlines).count)
+        let outputLength = text.trimmingCharacters(in: .whitespacesAndNewlines).count
+        let maximum = max(originalLength + 200, originalLength * 2)
+        guard outputLength <= maximum else {
+            throw TajpoError.api("The Shorten result expanded beyond a safe limit and cannot be replaced automatically.")
+        }
+    }
+}
+
 public enum WhitespacePreserver {
     /// Re-applies `original`'s leading and trailing whitespace to `text`.
     public static func apply(original: String, to text: String) -> String {

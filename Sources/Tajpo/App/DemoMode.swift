@@ -32,9 +32,30 @@ enum DemoScene: String, CaseIterable {
         requested == .onboardingReady
     }
 
+    static var simulatesTrustedAccess: Bool {
+        simulatesReady
+    }
+
     static var requested: DemoScene? {
         UserDefaults.standard.string(forKey: "TajpoDemo").flatMap(DemoScene.init(rawValue:))
     }
+}
+
+/// A client used only by launch-time demo scenes. It never performs network
+/// I/O, even if the surrounding user defaults contain a real provider.
+struct DemoLLMClient: LLMClient {
+    func stream(
+        _ prompt: PromptRequest,
+        model: String,
+        onPartial: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        _ = prompt
+        let result = "They're going to the library tomorrow, but he and I think it's closed. Can you check the opening hours?"
+        await onPartial(result)
+        return result
+    }
+
+    func testConnection(model: String) async throws {}
 }
 
 extension AppModel {

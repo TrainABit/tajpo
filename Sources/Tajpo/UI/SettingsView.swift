@@ -132,7 +132,7 @@ private struct GeneralSettings: View {
                 Text("The update check asks GitHub for the latest release number. It sends nothing about you or your text.")
                     .foregroundStyle(.secondary)
                 if AppLocation.isTemporary {
-                    Text("Move Tajpo to your Applications folder to start it at login.").foregroundStyle(.secondary)
+                    Text("Tajpo is running from a temporary location. Drag it from Finder into Applications to start it at login.").foregroundStyle(.secondary)
                 } else if !LaunchAtLogin.isAvailable {
                     Text("Available when Tajpo runs as an app bundle (scripts/build-app.sh).").foregroundStyle(.secondary)
                 }
@@ -236,6 +236,7 @@ private struct AISettings: View {
     @State private var keyMessage: Message?
     @State private var confirmRemove = false
     @State private var testing = false
+    @State private var testGeneration = UUID()
     @State private var modelChoice: String
     @State private var customModel: String
     @State private var modelMessage: Message?
@@ -254,6 +255,7 @@ private struct AISettings: View {
         _customModel = State(initialValue: settings.model)
         _baseURLField = State(initialValue: settings.usesOpenAI ? "http://localhost:11434/v1" : settings.baseURL.absoluteString)
         _projectField = State(initialValue: settings.projectID)
+        _testGeneration = State(initialValue: UUID())
     }
 
     var body: some View {
@@ -264,8 +266,11 @@ private struct AISettings: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: provider) { _, new in
+                    testGeneration = UUID()
                     if new == .openAI {
                         applyServer(ModelCatalog.defaultBaseURL.absoluteString)
+                    } else {
+                        applyServer(baseURLField)
                     }
                 }
             } footer: {
@@ -288,36 +293,48 @@ private struct AISettings: View {
                 }
             }
 
-            Section {
-                if let hint = model.apiKeyHint {
-                    LabeledContent("Saved in Keychain", value: hint)
-                } else {
-                    Text(provider == .openAI ? "No key saved yet." : "No key saved. Local servers usually don't need one.")
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    SecureField("API key", text: $keyField,
-                                prompt: Text(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it"))
-                        .onSubmit(saveKey)
-                    Button("Save") { saveKey() }
-                        .disabled(keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                HStack {
-                    Button(testing ? "Testing…" : "Test Connection") { test() }
-                        .disabled(testing)
-                    Button("Remove Key", role: .destructive) { confirmRemove = true }
-                        .disabled(model.apiKeyHint == nil)
-                    Spacer()
-                    if provider == .openAI {
+            if provider == .openAI {
+                Section {
+                    if let hint = model.apiKeyHint {
+                        LabeledContent("Saved in Keychain", value: hint)
+                    } else {
+                        Text("No key saved yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        SecureField("API key", text: $keyField,
+                                    prompt: Text(model.apiKeyHint == nil ? "Paste your API key" : "Paste a new key to replace it"))
+                            .onSubmit { saveKey() }
+                        Button("Save") { saveKey() }
+                            .disabled(keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || testing)
+                    }
+                    HStack {
+                        Button(testing ? "Testing…" : "Test Connection") { test() }
+                            .disabled(testing)
+                        Button("Remove Key", role: .destructive) { confirmRemove = true }
+                            .disabled(model.apiKeyHint == nil)
+                        Spacer()
                         Link("Get an API key ↗", destination: Links.apiKeys)
                     }
+                    MessageView(message: keyMessage)
+                } header: {
+                    Text("OpenAI API key")
+                } footer: {
+                    Text("\(ModelCatalog.costHint) API usage is billed by OpenAI separately from ChatGPT and needs prepaid credit. The key is sent only to OpenAI, never to a custom server.")
+                        .foregroundStyle(.secondary)
                 }
-                MessageView(message: keyMessage)
-            } header: {
-                Text("API key")
-            } footer: {
-                if provider == .openAI {
-                    Text("\(ModelCatalog.costHint) API usage is billed by OpenAI separately from ChatGPT and needs prepaid credit.")
+            } else {
+                Section {
+                    HStack {
+                        Button(testing ? "Testing…" : "Test Connection") { test() }
+                            .disabled(testing)
+                        Spacer()
+                    }
+                    MessageView(message: keyMessage ?? serverMessage)
+                } header: {
+                    Text("Connection")
+                } footer: {
+                    Text("No OpenAI key is loaded or sent to this server. HTTPS is required except for localhost.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -344,7 +361,11 @@ private struct AISettings: View {
                 }
                 if provider == .openAI {
                     TextField("Project ID", text: $projectField, prompt: Text("Optional"))
-                        .onSubmit { settings.setProjectID(projectField) }
+                        .onSubmit {
+                            settings.setProjectID(projectField)
+                            model.invalidateAPIKeyValidation()
+                            model.refreshStatus()
+                        }
                 }
                 MessageView(message: modelMessage)
             }
@@ -377,32 +398,49 @@ private struct AISettings: View {
     }
 
     private func saveKey() {
-        do {
-            try model.saveAPIKey(keyField)
-            keyField = ""
-            keyMessage = .info("Saved in Keychain. Testing…")
-            test()
-        } catch {
-            keyMessage = .error(error.localizedDescription)
+        let candidate = keyField.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return }
+        testing = true
+        let generation = UUID()
+        testGeneration = generation
+        keyMessage = .info("Testing the new key before saving it…")
+        Task {
+            do {
+                try await model.saveAndValidateAPIKey(candidate)
+                guard testGeneration == generation else { return }
+                keyField = ""
+                keyMessage = .success("Key validated and saved in Keychain.")
+                model.refreshStatus()
+            } catch {
+                guard testGeneration == generation else { return }
+                keyMessage = .error(AppModel.map(error).localizedDescription)
+            }
+            if testGeneration == generation { testing = false }
         }
     }
 
     private func test() {
+        let generation = UUID()
+        testGeneration = generation
         testing = true
         Task {
-            defer { testing = false }
             do {
                 try await model.testConnection()
+                guard testGeneration == generation else { return }
                 keyMessage = .success("Connected. \(settings.model) is ready to use.")
             } catch {
+                guard testGeneration == generation else { return }
                 keyMessage = .error(AppModel.map(error).localizedDescription)
             }
+            if testGeneration == generation { testing = false }
         }
     }
 
     private func applyModel(_ text: String) {
+        testGeneration = UUID()
         do {
             try settings.setModel(text)
+            model.invalidateAPIKeyValidation()
             customModel = settings.model
             modelMessage = .success("Now using \(settings.model).")
         } catch {
@@ -411,8 +449,10 @@ private struct AISettings: View {
     }
 
     private func applyServer(_ text: String) {
+        testGeneration = UUID()
         do {
             try settings.setBaseURL(text)
+            model.invalidateAPIKeyValidation()
             if provider == .openAI { settings.setProjectID(projectField) }
             serverMessage = .success("Using \(settings.baseURL.absoluteString).")
             model.refreshStatus()

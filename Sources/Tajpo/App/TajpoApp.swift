@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
         DispatchQueue.main.async {
-            AppLocation.offerMoveIfNeeded()
+            AppLocation.offerFinderHandoffIfNeeded()
             EditMenu.installIfMissing()
             EditMenu.installWindowMenuIfMissing()
             AppModel.shared.start()
@@ -58,7 +58,7 @@ struct MenuContent: View {
         }
         if model.needsAPIKey {
             Button { model.showOnboarding(at: OnboardingStep.connect.rawValue) } label: {
-                Label("Finish Setup: Add Your OpenAI Key…", systemImage: "key")
+                Label(model.apiKeyHint == nil ? "Finish Setup: Add Your OpenAI Key…" : "Finish Setup: Check Your OpenAI Key…", systemImage: "key")
             }
         }
         if !model.accessibilityTrusted {

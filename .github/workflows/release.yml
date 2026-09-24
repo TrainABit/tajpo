@@ -1,69 +1,247 @@
 name: Release
 
-# Push a tag like v0.3.0 to build, sign, notarize, and draft a GitHub Release.
-#
-# Required repository secrets:
-#   DEVELOPER_ID_P12_BASE64    base64 of the exported "Developer ID Application" certificate (.p12)
-#   DEVELOPER_ID_P12_PASSWORD  its export password
-#   SIGN_IDENTITY              e.g. "Developer ID Application: Your Name (TEAMID)"
-#   NOTARY_KEY_P8_BASE64       base64 of an App Store Connect API key (.p8)
-#   NOTARY_KEY_ID              the key's ID
-#   NOTARY_ISSUER              the issuer ID
+# Release is deliberately manual. The workflow file comes from main, while
+# the build job checks out and validates the requested tag before any secrets
+# are available. Configure signing/notary values as `release` Environment
+# secrets, not repository secrets.
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v0.3.0"
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    name: Build unsigned release candidate
+    runs-on: macos-15
+    timeout-minutes: 35
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate tag identity
+        id: identity
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]] || {
+            echo "Tag must look like v0.3.0" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main
+          TAG_COMMIT="$(git rev-parse "$REQUESTED_TAG^{commit}")"
+          MAIN_COMMIT="$(git rev-parse origin/main)"
+          [[ "$TAG_COMMIT" == "$MAIN_COMMIT" ]] || {
+            echo "The release tag must point at the current origin/main commit" >&2
+            exit 1
+          }
+          VERSION="${REQUESTED_TAG#v}"
+          scripts/release-preflight.sh "$VERSION"
+          printf 'tag=%s\nversion=%s\ncommit=%s\n' "$REQUESTED_TAG" "$VERSION" "$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build unsigned candidate
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          set -euo pipefail
+          swift test
+          VERSION="$VERSION" scripts/build-app.sh --dmg
+          DMG="$(find build -maxdepth 1 -name 'Tajpo-*.dmg' -print -quit)"
+          test -n "$DMG"
+          hdiutil verify "$DMG"
+          (cd build && shasum -c "$(basename "$DMG").sha256")
+
+      - name: Write provenance manifest
+        id: manifest
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          COMMIT: ${{ steps.identity.outputs.commit }}
+        run: |
+          python3 - "$VERSION" "$COMMIT" <<'PY'
+          import json, platform, subprocess, sys
+          version, commit = sys.argv[1:]
+          def run(*args):
+              return subprocess.check_output(args, text=True).strip()
+          manifest = {
+              "version": version,
+              "commit": commit,
+              "xcode": run("xcodebuild", "-version"),
+              "swift": run("swift", "--version"),
+              "platform": platform.platform(),
+              "architectures": run("lipo", "-archs", "build/Tajpo.app/Contents/MacOS/Tajpo"),
+              "bundle_id": "com.trainabit.tajpo",
+              "dmg_sha256": open(f"build/Tajpo-{version}.dmg.sha256", encoding="utf-8").read().split()[0],
+          }
+          with open("build/Tajpo-release-manifest.json", "w", encoding="utf-8") as output:
+              json.dump(manifest, output, indent=2)
+              output.write("\n")
+          PY
+          echo "path=build/Tajpo-release-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tajpo-unsigned-${{ github.run_id }}
+          path: |
+            build/Tajpo.app
+            build/Tajpo-*.dmg
+            build/Tajpo-*.dmg.sha256
+            build/Tajpo-*.dSYM.zip
+            build/Tajpo-release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    name: Sign and notarize fixed artifact
+    needs: build
     runs-on: macos-15
     timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          fetch-depth: 0
+          name: tajpo-unsigned-${{ github.run_id }}
+          path: release-input
 
-      - run: swift test
-
-      - name: Import the signing certificate
+      - name: Import signing identity
         env:
           P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
         run: |
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          set -euo pipefail
+          : "${P12_BASE64:?Missing DEVELOPER_ID_P12_BASE64}"
+          : "${P12_PASSWORD:?Missing DEVELOPER_ID_P12_PASSWORD}"
+          : "${SIGN_IDENTITY:?Missing SIGN_IDENTITY}"
+          KEYCHAIN="$RUNNER_TEMP/tajpo-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/tajpo-cert.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 3600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security import "$RUNNER_TEMP/tajpo-cert.p12" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security -t cert -f pkcs12 -k "$KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          rm "$RUNNER_TEMP/cert.p12"
+          rm -f "$RUNNER_TEMP/tajpo-cert.p12"
+          printf 'KEYCHAIN=%s\n' "$KEYCHAIN" > "$RUNNER_TEMP/tajpo-keychain.env"
 
-      - name: Build, sign, and notarize
+      - name: Sign app, DMG, and notarize
         env:
           SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
           NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT: ${{ needs.build.outputs.commit }}
         run: |
-          export NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
-          echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
-          VERSION="${GITHUB_REF_NAME#v}" scripts/build-app.sh --dmg
-          rm -f "$NOTARY_KEY_PATH"
+          set -euo pipefail
+          : "${NOTARY_KEY_P8_BASE64:?Missing NOTARY_KEY_P8_BASE64}"
+          : "${NOTARY_KEY_ID:?Missing NOTARY_KEY_ID}"
+          : "${NOTARY_ISSUER:?Missing NOTARY_ISSUER}"
+          source "$RUNNER_TEMP/tajpo-keychain.env"
+          NOTARY_KEY="$RUNNER_TEMP/tajpo-notary.p8"
+          printf '%s' "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$NOTARY_KEY"
+          APP="release-input/Tajpo.app"
+          OUT="release-output"
+          TMP="$(mktemp -d)"
+          mkdir -p "$OUT"
+          cleanup() {
+            rm -f "$NOTARY_KEY"
+            security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+            rm -rf "$TMP"
+          }
+          trap cleanup EXIT
 
-      - name: Draft the GitHub Release
+          codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          APP_ZIP="$TMP/Tajpo.app.zip"
+          ditto -c -k --keepParent "$APP" "$APP_ZIP"
+          NOTARY_RESULT="$(xcrun notarytool submit "$APP_ZIP" --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --output-format json)"
+          NOTARY_STATUS="$(printf '%s' "$NOTARY_RESULT" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+          [[ "$NOTARY_STATUS" == Accepted ]] || { printf '%s\n' "$NOTARY_RESULT" >&2; exit 1; }
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl -a -vvv -t exec "$APP"
+
+          STAGE="$TMP/dmg"
+          mkdir -p "$STAGE"
+          ditto "$APP" "$STAGE/Tajpo.app"
+          ln -s /Applications "$STAGE/Applications"
+          DMG="$OUT/Tajpo-$VERSION.dmg"
+          hdiutil create -volname Tajpo -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+          codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+          DMG_RESULT="$(xcrun notarytool submit "$DMG" --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --output-format json)"
+          DMG_STATUS="$(printf '%s' "$DMG_RESULT" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+          [[ "$DMG_STATUS" == Accepted ]] || { printf '%s\n' "$DMG_RESULT" >&2; exit 1; }
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl -a -vvv -t open --context context:primary-signature "$DMG"
+          hdiutil verify "$DMG"
+          (cd "$OUT" && shasum -a 256 "Tajpo-$VERSION.dmg" > "Tajpo-$VERSION.dmg.sha256")
+          python3 - "$OUT/Tajpo-$VERSION.dmg.sha256" release-input/Tajpo-release-manifest.json "$COMMIT" <<'PY'
+          import json, pathlib, sys
+          checksum_file, manifest_file, commit = sys.argv[1:]
+          checksum = pathlib.Path(checksum_file).read_text(encoding="utf-8").split()[0]
+          data = json.loads(pathlib.Path(manifest_file).read_text(encoding="utf-8"))
+          data["commit"] = commit
+          data["dmg_sha256"] = checksum
+          data["signed"] = True
+          data["notarized"] = True
+          pathlib.Path(manifest_file).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+          PY
+          cp release-input/Tajpo-*.dSYM.zip "$OUT/"
+          cp release-input/Tajpo-release-manifest.json "$OUT/"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tajpo-signed-${{ github.run_id }}
+          path: release-output/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Create or update draft release
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tajpo-signed-${{ github.run_id }}
+          path: release-assets
+      - name: Publish draft idempotently
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" \
-            "build/Tajpo-$VERSION.dmg" "build/Tajpo-$VERSION.dmg.sha256" "build/Tajpo-$VERSION.dSYM.zip" \
-            --title "Tajpo $VERSION" --generate-notes --draft
-
-      - name: Remove the signing keychain
-        if: always()
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          set -euo pipefail
+          cd release-assets
+          assets=(Tajpo-*.dmg Tajpo-*.dmg.sha256 Tajpo-*.dSYM.zip Tajpo-release-manifest.json)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .draft)"
+            [[ "$draft" == true ]] || { echo "$TAG is already published; refusing to overwrite it" >&2; exit 1; }
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" --title "Tajpo $VERSION" --generate-notes --draft
+          fi

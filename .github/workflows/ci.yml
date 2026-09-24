@@ -1,50 +1,78 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  source-checks:
+    name: Source checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check shell and Python syntax
+        run: |
+          bash -n scripts/*.sh
+          python3 -m py_compile scripts/make-icon.py Tests/E2E/fake_openai.py
+      - name: Check whitespace
+        run: git diff --check
+
   core-tests-linux:
     name: Core tests (Linux)
     runs-on: ubuntu-latest
     container: swift:6.1-noble
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - run: swift test
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: swift test --enable-code-coverage
 
   macos:
-    name: Build, test, and bundle (macOS)
+    name: Build, test, and bundle (macOS 15)
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 35
+    env:
+      # Keep the deployment floor exercised even though hosted CI uses the
+      # current macOS image (macOS 14 images may not have Swift 6 installed).
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      UNIVERSAL: '1'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: xcodebuild -version && swift --version
       - run: swift build
       - run: swift test
-      - name: Build Tajpo.app (ad hoc signed, for testing only)
-        run: scripts/build-app.sh --dmg
-      - name: Verify the bundle
+      - name: Build and verify development bundle
         run: |
-          lipo -archs build/Tajpo.app/Contents/MacOS/Tajpo
+          scripts/build-app.sh --dmg
+          DMG="$(find build -maxdepth 1 -name 'Tajpo-*.dmg' -print -quit)"
+          test -n "$DMG"
+          hdiutil verify "$DMG"
+          (cd build && shasum -c "$(basename "$DMG").sha256")
           plutil -lint build/Tajpo.app/Contents/Info.plist
-          codesign -dvv build/Tajpo.app
-      - uses: actions/upload-artifact@v5
+          codesign --verify --deep --strict --verbose=2 build/Tajpo.app
+          lipo -archs build/Tajpo.app/Contents/MacOS/Tajpo
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Tajpo-dev-build
+          name: Tajpo-dev-build-macos-15
           path: |
             build/Tajpo-*.dmg
+            build/Tajpo-*.dmg.sha256
             build/Tajpo-*.dSYM.zip
           if-no-files-found: error
           retention-days: 14

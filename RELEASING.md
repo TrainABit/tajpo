@@ -4,13 +4,14 @@
 
 1. **Apple Developer Program.** Enroll, then create a **Developer ID Application** certificate. Export it as `.p12`.
 2. **Notarization credentials.** Create an App Store Connect API key (Users and Access ▸ Integrations ▸ Team Keys, Developer role). Note the key ID and issuer ID.
-3. **Repository secrets.** Add these under Settings ▸ Secrets and variables ▸ Actions:
+3. **`release` Environment secrets.** Create the `release` environment and add these as environment-scoped secrets, not repository secrets:
    - `DEVELOPER_ID_P12_BASE64`: output of `base64 -i cert.p12`
    - `DEVELOPER_ID_P12_PASSWORD`
    - `SIGN_IDENTITY`: e.g. `Developer ID Application: Your Name (TEAMID)`
    - `NOTARY_KEY_P8_BASE64`: output of `base64 -i AuthKey_XXXX.p8`
    - `NOTARY_KEY_ID`
    - `NOTARY_ISSUER`
+   The signing job imports the certificate only after the unsigned build job has completed and only signs the downloaded artifact.
 4. **Decisions** to make before the first public release:
    - [ ] **License.** Add `LICENSE`, and update `NSHumanReadableCopyright` in `Support/Info.plist` if needed.
    - [ ] **Bundle ID.** `com.trainabit.tajpo` must be a domain you control. Freeze it; changing it later loses users' settings, key and permissions.
@@ -23,10 +24,12 @@
 ## Every release
 
 1. Update `CHANGELOG.md`. If the default model changed, re-check `ModelCatalog.costHint` against OpenAI's pricing.
-2. Run the manual QA matrix below on at least one Apple Silicon Mac and, ideally, one Intel Mac.
-3. Tag and push: `git tag v0.3.0 && git push origin v0.3.0`. The Release workflow builds, signs, notarizes, and drafts a GitHub Release with the DMG, its SHA-256 checksum, and the dSYM.
-4. On a clean Mac (or VM), download the DMG through a browser and open it. Expect only the standard "downloaded from the Internet" prompt.
-5. Publish the draft release. Update `version` and `sha256` in `packaging/homebrew/tajpo.rb` and in your tap.
+2. Resolve the open licensing, privacy, bundle-ID and support decisions above. `scripts/release-preflight.sh` fails closed while `PRIVACY.md` is a draft or the cask still contains a placeholder.
+3. Run the manual QA matrix below on at least one Apple Silicon Mac and, ideally, one Intel Mac.
+4. Protect `main`, push the release commit, then create and push the tag: `git tag v0.3.0 && git push origin v0.3.0`.
+5. Manually dispatch **Release** with that exact tag. The workflow requires the tag to equal the current `origin/main` commit, builds and tests without secrets, signs/notarizes only the downloaded artifact, records the signed DMG checksum in the provenance manifest, and creates a draft release.
+6. On a clean Mac (or VM), download the DMG through a browser and open it. Expect only the standard "downloaded from the Internet" prompt.
+7. Publish the draft release. Update the Homebrew tap only after its checksum has been verified.
 
 To build a signed release locally instead:
 
@@ -52,21 +55,13 @@ SIGN_IDENTITY="Developer ID Application: … (TEAMID)" NOTARY_PROFILE=tajpo-nota
 | Keyboard layouts | U.S., German, French, Dvorak, Dvorak–QWERTY ⌘, Russian |
 | Environment | multiple displays, a full-screen app, Stage Manager, light and dark mode, VoiceOver, Increase Contrast, a clipboard manager (Maccy/Raycast) |
 | Providers | valid key; invalid key; no credit; gpt-5-mini; Ollama; offline |
-| Lifecycle | first launch from the DMG (offers to move to Applications); launch at login on/off; updating over an existing install keeps permission and key |
+| Lifecycle | first launch from the DMG (safe Finder handoff); launch at login on/off; updating over an existing install keeps permission and key |
 
 Also run the Appendix D checks in `AUDIT.md`.
 
 ## Updates
 
-Tajpo doesn't update itself yet. Options:
-
-- **Sparkle 2 (recommended).**
-  1. Add the Swift package.
-  2. Embed `Sparkle.framework` and sign it from the inside out in `scripts/build-app.sh` (XPC services → Autoupdate → Updater.app → framework → app).
-  3. Add `SUFeedURL` and `SUPublicEDKey` to Info.plist.
-  4. Host `appcast.xml` on GitHub Pages.
-  5. Mention the update check in `PRIVACY.md`.
-- **Homebrew cask only.** Use `packaging/homebrew/tajpo.rb` in your own tap.
+Tajpo currently checks GitHub Releases and opens the release page; it does not silently replace the app. The check is opt-in or manual and the Privacy Policy explains the request. Sparkle can be added later as a separate reviewed change.
 
 ## Crash reports
 
