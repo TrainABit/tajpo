@@ -12,12 +12,12 @@ cp "$BIN_DIR/Tajpo" "$APP/Contents/MacOS/Tajpo"
 cp "$ROOT/Sources/Tajpo/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.trainabit.tajpo' "$APP/Contents/Info.plist"
 RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 2 -name 'Tajpo_TajpoCore.bundle' -print -quit 2>/dev/null || true)"
-if [[ -z "$RESOURCE_BUNDLE" ]]; then
-  echo "missing Tajpo_TajpoCore.bundle" >&2
-  exit 1
+if [[ -n "$RESOURCE_BUNDLE" ]]; then
+  ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
 fi
-ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/Tajpo_TajpoCore.bundle"
-test -f "$APP/Contents/Resources/Tajpo_TajpoCore.bundle/Contents/Resources/demo-lexicon.json"
+# Keep a direct copy for ad-hoc preview bundles; the loader supports both layouts.
+cp "$ROOT/Sources/TajpoCore/Resources/demo-lexicon.json" "$APP/Contents/Resources/demo-lexicon.json"
+test -f "$APP/Contents/Resources/demo-lexicon.json"
 cp "$ROOT/Sources/TajpoCore/Resources/AppIcon.png" "$APP/Contents/Resources/AppIcon.png"
 chmod +x "$APP/Contents/MacOS/Tajpo"
 codesign --force --deep --sign - "$APP"

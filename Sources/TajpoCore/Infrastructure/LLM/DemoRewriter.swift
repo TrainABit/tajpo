@@ -53,6 +53,13 @@ public enum DemoLexiconLoader {
             candidates.append(root.appendingPathComponent("Contents/Resources/\(bundleName)"))
         }
 
+        // A direct resource is a safe last-resort layout for small ad-hoc
+        // preview apps and still avoids touching the fatal Bundle.module path.
+        for root in roots.compactMap({ $0 }) {
+            let direct = root.appendingPathComponent("demo-lexicon.json")
+            if fileManager.fileExists(atPath: direct.path) { return direct }
+        }
+
         for candidate in candidates {
             if let bundle = Bundle(url: candidate),
                let resource = bundle.url(forResource: "demo-lexicon", withExtension: "json") {
