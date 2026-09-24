@@ -19,7 +19,7 @@ struct KeychainAPIKeyStore: APIKeyStoring {
     private let account = "openai-api-key"
 
     private var migrationServices: [String] {
-        service == Self.defaultService ? [service, Self.legacyService] : [service]
+        Self.service == Self.defaultService ? [Self.service, Self.legacyService] : [Self.service]
     }
 
     func load() throws -> String? {

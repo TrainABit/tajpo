@@ -247,14 +247,14 @@ struct OnboardingView: View {
 
     private func isComplete(_ item: OnboardingStep) -> Bool {
         switch item {
-        case .welcome: true
+        case .welcome: return true
         case .connect:
             if model.isDemo { return true }
             if settings.usesOpenAI { return model.apiKeyValidated && keyStatus != .checking }
             return keyStatus == .connected
-        case .tryIt: practice.fixes != nil
-        case .everywhere: model.accessibilityTrusted
-        case .done: false
+        case .tryIt: return practice.fixes != nil
+        case .everywhere: return model.accessibilityTrusted
+        case .done: return false
         }
     }
 
@@ -579,7 +579,7 @@ struct OnboardingView: View {
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
-                Toggle("Check for new versions weekly (asks GitHub for the latest version number, nothing else)", isOn: $checkUpdates)
+                Toggle("Check for new versions weekly (asks GitHub for the latest version and product name)", isOn: $checkUpdates)
             }
             .card()
             Label("Tajpo lives in your menu bar, where you'll find settings, presets, and this guide.", systemImage: "menubar.arrow.up.rectangle")
@@ -636,15 +636,15 @@ struct OnboardingView: View {
 
     private var primaryTitle: String {
         switch step {
-        case .welcome: "Get Started"
+        case .welcome: return "Get Started"
         case .connect:
             if model.isDemo { return "Continue" }
             if !keyField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Check Key" }
             if settings.usesOpenAI, model.apiKeyHint != nil, !model.apiKeyValidated { return "Test Saved Key" }
             return isComplete(.connect) ? "Continue" : "Check Connection"
-        case .tryIt: "Continue"
-        case .everywhere: model.accessibilityTrusted ? "Continue" : "Open System Settings"
-        case .done: missingItems.isEmpty ? "Start Writing" : "Finish Later"
+        case .tryIt: return "Continue"
+        case .everywhere: return model.accessibilityTrusted ? "Continue" : "Open System Settings"
+        case .done: return missingItems.isEmpty ? "Start Writing" : "Finish Later"
         }
     }
 

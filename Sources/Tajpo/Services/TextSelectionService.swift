@@ -266,7 +266,7 @@ final class TextSelectionService {
 
     private func focusedElement(in app: NSRunningApplication?) -> AXUIElement? {
         if let element = elementAttribute(systemWideElement, kAXFocusedUIElementAttribute),
-           app == nil || runningApp(for: element)?.processIdentifier == app.processIdentifier {
+           app == nil || runningApp(for: element)?.processIdentifier == app?.processIdentifier {
             return element
         }
         guard let app else { return nil }
@@ -327,7 +327,8 @@ final class TextSelectionService {
 
     private func selectionBounds(of element: AXUIElement) -> CGRect? {
         guard let rangeValue = selectedRange(of: element) else { return nil }
-        var value = AXValueCreate(.cfRange, rangeValue)!
+        var range = rangeValue
+        let value = AXValueCreate(.cfRange, &range)!
         var boundsValue: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString, value, &boundsValue) == .success,
               let boundsValue, CFGetTypeID(boundsValue) == AXValueGetTypeID() else { return nil }
@@ -347,11 +348,12 @@ final class TextSelectionService {
 
     private enum Verification { case inserted, unchanged, unknown }
 
-    private func verify(_ element: AXUIElement, inserted text: String, capture: TextCapture) -> Verification {
+    private func verify(_ element: AXUIElement, inserted insertedText: String, capture: TextCapture) -> Verification {
+        let text = insertedText
         let expected = Self.normalized(text).trimmingCharacters(in: .whitespacesAndNewlines)
         if let range = capture.selectedRange {
             let replacementRange = CFRange(location: range.location, length: text.utf16.count)
-            if let value = text(in: replacementRange, of: element), Self.normalized(value) == expected {
+            if let value = textInRange(replacementRange, of: element), Self.normalized(value) == expected {
                 return .inserted
             }
         }
@@ -359,7 +361,7 @@ final class TextSelectionService {
         return .unknown
     }
 
-    private func text(in range: CFRange, of element: AXUIElement) -> String? {
+    private func textInRange(_ range: CFRange, of element: AXUIElement) -> String? {
         var value = range
         guard let rangeValue = AXValueCreate(.cfRange, &value) else { return nil }
         var result: CFTypeRef?

@@ -78,11 +78,10 @@ public struct StreamAccumulator: Sendable {
         return false
     }
 
-    public var isComplete: Bool { sawDone }
+    public var isComplete: Bool { sawDone || finishReason != nil }
 
     /// The final text, or an error if the output is unusable for replacement.
     public func result() throws -> String {
-        guard sawDone else { throw TajpoError.incompleteResponse }
         switch finishReason {
         case "stop":
             break
@@ -93,6 +92,8 @@ public struct StreamAccumulator: Sendable {
         case .some(let reason):
             throw TajpoError.api("The model stopped with an unsupported reason (\(reason)). The result cannot be replaced safely.")
         case nil:
+            // A closed stream without an explicit finish reason may contain a
+            // partial result. Never treat that as safe replacement text.
             throw TajpoError.incompleteResponse
         }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

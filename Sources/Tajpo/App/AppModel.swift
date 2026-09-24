@@ -111,14 +111,16 @@ final class AppModel: ObservableObject {
         let hint = keyStore.savedKeyHint()
         if hint != apiKeyHint {
             apiKeyHint = hint
-            if hint == nil { apiKeyValidated = false }
+            // A different Keychain value is a new credential until it has
+            // been tested, even if a previous value was valid.
+            apiKeyValidated = false
         }
         let login = LaunchAtLogin.isEnabled
         if login != launchAtLoginEnabled { launchAtLoginEnabled = login }
     }
 
     var needsAPIKey: Bool {
-        guard settings.usesOpenAI, !DemoScene.simulatesReady else { return false }
+        guard !isDemo, settings.usesOpenAI, !DemoScene.simulatesReady else { return false }
         return apiKeyHint == nil || !apiKeyValidated
     }
 
@@ -575,8 +577,10 @@ final class AppModel: ObservableObject {
         let client = makeClient(candidate, settings.baseURL, settings.projectID)
         try await client.testConnection(model: settings.model)
         try keyStore.save(candidate)
-        apiKeyValidated = true
         refreshStatus()
+        // refreshStatus invalidates when the hint changes; the candidate was
+        // just tested, so record that validation after refreshing the hint.
+        apiKeyValidated = true
     }
 
     func removeAPIKey() throws {

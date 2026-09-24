@@ -41,17 +41,14 @@ jobs:
       - run: swift test --enable-code-coverage
 
   macos:
-    name: Build, test, and bundle (macOS ${{ matrix.os }})
-    runs-on: macos-${{ matrix.os }}
+    name: Build, test, and bundle (macOS 15)
+    runs-on: macos-15
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: 14
-            universal: 0
-          - os: 15
-            universal: 1
+    env:
+      # Keep the deployment floor exercised even though hosted CI uses the
+      # current macOS image (macOS 14 images may not have Swift 6 installed).
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      UNIVERSAL: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,8 +58,6 @@ jobs:
       - run: swift build
       - run: swift test
       - name: Build and verify development bundle
-        env:
-          UNIVERSAL: ${{ matrix.universal }}
         run: |
           scripts/build-app.sh --dmg
           DMG="$(find build -maxdepth 1 -name 'Tajpo-*.dmg' -print -quit)"
@@ -74,7 +69,7 @@ jobs:
           lipo -archs build/Tajpo.app/Contents/MacOS/Tajpo
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Tajpo-dev-build-macos-${{ matrix.os }}
+          name: Tajpo-dev-build-macos-15
           path: |
             build/Tajpo-*.dmg
             build/Tajpo-*.dmg.sha256
