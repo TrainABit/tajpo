@@ -133,7 +133,7 @@ final class TextSelectionService {
                 switch verify(element, inserted: text, capture: capture) {
                 case .inserted: return .verified
                 case .unknown: return .axUnverified
-                case .unchanged: Log.selection.info("AX set reported success but changed nothing; trying a verified paste")
+                case .unchanged: Log.selection.info("AX set reported success but changed nothing; leaving the result available to copy")
                 }
             }
         }
