@@ -98,39 +98,34 @@ struct OnboardingView: View {
         settings = model.settings
     }
 
-    static let size = CGSize(width: 840, height: 580)
+    static let size = CGSize(width: 800, height: 560)
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            VStack(alignment: .leading, spacing: 16) {
-                if resumed {
-                    Label("Welcome back. Pick up where you left off.", systemImage: "arrow.uturn.forward")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                GeometryReader { proxy in
-                    ScrollView {
-                        content
-                            .frame(maxWidth: 700, alignment: .topLeading)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.bottom, 8)
-                            // Short steps sit in the middle instead of leaving a gap above the buttons.
-                            .frame(minHeight: proxy.size.height, alignment: centersContent ? .center : .top)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                }
-                .scrollIndicators(.automatic)
-                .id(step)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .opacity))
-                navigation
+        VStack(spacing: 0) {
+            setupHeader
+            progressHeader
+            if resumed {
+                resumedBanner
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 40)
-            .padding(.bottom, 26)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            GeometryReader { proxy in
+                ScrollView {
+                    content
+                        .frame(maxWidth: 660, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
+                        // Keep short steps visually settled instead of leaving a large empty field.
+                        .frame(minHeight: proxy.size.height, alignment: centersContent ? .center : .top)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+            .scrollIndicators(.automatic)
+            .id(step)
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 10)), removal: .opacity))
+            navigation
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay {
             if step == .done && missingItems.isEmpty && !reduceMotion {
                 Confetti().allowsHitTesting(false)
@@ -166,84 +161,80 @@ struct OnboardingView: View {
     }
 
     private var centersContent: Bool {
-        step == .welcome || step == .done
+        step == .welcome || step == .connect || step == .tryIt || step == .done
     }
 
-    // MARK: Sidebar
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 40, height: 40)
-                    // The icon shares the sidebar's colors; a light rim keeps it from blending in.
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.55), lineWidth: 1).padding(4))
-                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Tajpo").font(.title2.bold())
-                    Text("Setup").font(.callout).opacity(0.75)
-                }
+    private var setupHeader: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Set up Tajpo")
+                    .font(.title3.weight(.semibold))
+                Text("A few quick steps, then you're ready to write")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.top, 50)
-            .padding(.bottom, 30)
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(OnboardingStep.allCases) { item in
-                    stepRow(item)
-                }
-            }
-            Spacer()
-            Label(step == .done ? (missingItems.isEmpty ? "All set" : "Almost there") : "About 3 minutes",
-                  systemImage: step == .done && missingItems.isEmpty ? "checkmark.circle" : "clock")
-                .font(.caption)
-                .opacity(0.8)
+            Spacer(minLength: 16)
+            Text("Step \(step.rawValue + 1) of \(OnboardingStep.allCases.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 26)
-        .frame(width: 224, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .foregroundStyle(.white)
-        .background(Brand.sidebar)
-        .environment(\.colorScheme, .dark)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Setup step \(step.rawValue + 1) of \(OnboardingStep.allCases.count), \(step.label)")
+        .padding(.horizontal, 32)
+        .padding(.top, 22)
+        .padding(.bottom, 14)
     }
 
-    private func stepRow(_ item: OnboardingStep) -> some View {
-        let current = item == step
-        let reachable = item.rawValue < step.rawValue
-        let done = reachable && isComplete(item)
-        return Button {
-            if reachable { step = item }
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(current ? Color.white : Color.white.opacity(done ? 0.3 : 0.14))
-                    if done {
-                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
-                    } else {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(current ? Brand.indigo : .white)
+    private var progressHeader: some View {
+        HStack(spacing: 0) {
+            ForEach(OnboardingStep.allCases) { item in
+                let current = item == step
+                let done = item.rawValue < step.rawValue && isComplete(item)
+                HStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .fill(current ? Brand.accent : done ? Brand.accent.opacity(0.16) : Color.primary.opacity(0.07))
+                        if done {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Brand.accent)
+                        } else {
+                            Image(systemName: item.symbol)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(current ? Color.white : Brand.accent)
+                        }
                     }
+                    .frame(width: 22, height: 22)
+                    Text(item.label)
+                        .font(.caption.weight(current ? .semibold : .regular))
+                        .foregroundStyle(current ? Color.primary : Color.secondary)
+                        .lineLimit(1)
                 }
-                .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.label).fontWeight(current ? .semibold : .medium)
-                    Text(item.detail).font(.caption).opacity(0.7)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(item.label)\(done ? ", complete" : "")\(current ? ", current step" : "")")
+
+                if item != .done {
+                    Rectangle()
+                        .fill(item.rawValue < step.rawValue ? Brand.accent.opacity(0.45) : Color.primary.opacity(0.12))
+                        .frame(height: 2)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(current ? 0.16 : 0)))
-            .opacity(current || reachable ? 1 : 0.72)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .allowsHitTesting(reachable)
-        .accessibilityLabel("\(item.label)\(done ? ", done" : "")\(current ? ", current step" : "")")
+        .padding(.horizontal, 32)
+        .padding(.bottom, 18)
+    }
+
+    private var resumedBanner: some View {
+        Label("Welcome back. Pick up where you left off.", systemImage: "arrow.uturn.forward")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func isComplete(_ item: OnboardingStep) -> Bool {
@@ -273,8 +264,8 @@ struct OnboardingView: View {
     }
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text("Better writing, in any app")
                     .font(.system(size: 30, weight: .bold))
                 Text("Select text, press a shortcut, and Tajpo fixes, polishes, shortens, or changes its tone right where you're writing.")
@@ -282,11 +273,15 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            DemoAnimation()
-            VStack(alignment: .leading, spacing: 12) {
-                feature("macwindow.on.rectangle", "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
-                feature("eye", "You approve every change", "See the result first. Nothing changes until you press Replace.")
-                feature("lock.shield", "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
+            HStack(alignment: .top, spacing: 26) {
+                VStack(alignment: .leading, spacing: 14) {
+                    feature("macwindow.on.rectangle", "Works where you write", "Mail, Notes, Slack, your browser, and most other apps.")
+                    feature("eye", "You approve every change", "See the result first. Nothing changes until you press Replace.")
+                    feature("lock.shield", "Private by design", "Uses your own key. No Tajpo servers, no account, no tracking.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                DemoAnimation()
+                    .frame(maxWidth: 300)
             }
         }
     }
@@ -622,8 +617,13 @@ struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .disabled(keyStatus == .checking)
         }
-        .controlSize(.large)
-        .padding(.top, 4)
+        .controlSize(.regular)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 14)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     private var skipTitle: String? {
@@ -861,18 +861,19 @@ private struct StepHeader: View {
     let subtitle: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .background(RoundedRectangle(cornerRadius: 10).fill(tint))
+                .frame(width: 36, height: 36)
+                .background(RoundedRectangle(cornerRadius: 9).fill(tint))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 24, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
